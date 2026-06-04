@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useApiFetch } from '../../../auth/use-api-fetch';
-import { BackButton } from '../../issue-category/back-button';
-import { ConfirmDeleteDialog } from '../../issue-category/confirm-delete-dialog';
+import { BackButton } from '../../../components/back-button';
+import { ConfirmDeleteDialog } from '../../../components/confirm-delete-dialog';
 
 interface User {
   id: number;

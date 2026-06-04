@@ -40,7 +40,9 @@
       "Bash(awk 'END{print NR}' packages/web/src/styles.css)",
       "PowerShell(Get-Content *)",
       "PowerShell(Get-ChildItem \"D:\\\\github\\\\llucn\\\\ai-poc\\\\node_modules\\\\@fortawesome\\\\free-solid-svg-icons\\\\\" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match \"faCircleCheck|faCheck\\\\.|faCircleXmark|faXmark|faBan|faCircleMinus\" } | Select-Object Name | Select-Object -First 10)",
-      "PowerShell(Get-ChildItem \"D:\\\\github\\\\llucn\\\\ai-poc\\\\node_modules\\\\@fortawesome\\\\free-solid-svg-icons\\\\\" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match \"^faCircleCheck\\\\.js$|^faCircleXmark\\\\.js$|^faCheck\\\\.js$|^faXmark\\\\.js$\" } | Select-Object Name)"
+      "PowerShell(Get-ChildItem \"D:\\\\github\\\\llucn\\\\ai-poc\\\\node_modules\\\\@fortawesome\\\\free-solid-svg-icons\\\\\" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match \"^faCircleCheck\\\\.js$|^faCircleXmark\\\\.js$|^faCheck\\\\.js$|^faXmark\\\\.js$\" } | Select-Object Name)",
+      "Bash(openspec list *)",
+      "Bash(npx openspec *)"
     ]
   }
 }

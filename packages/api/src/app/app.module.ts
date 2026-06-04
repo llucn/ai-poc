@@ -9,9 +9,6 @@ import { HeaderAuthGuard } from './auth/header-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { loadAppConfig } from './config/app-config';
 import { DatabaseModule } from './database/database.module';
-import { FieldModule } from './field/field.module';
-import { FormModule } from './form/form.module';
-import { IssueCategoryModule } from './issue-category/issue-category.module';
 import { MeModule } from './me/me.module';
 import { UserEntity } from './user/user.entity';
 import { UserModule } from './user/user.module';
@@ -27,9 +24,6 @@ import { UserModule } from './user/user.module';
     TypeOrmModule.forFeature([UserEntity]),
     AuthModule,
     MeModule,
-    IssueCategoryModule,
-    FieldModule,
-    FormModule,
     UserModule,
   ],
   controllers: [AppController],

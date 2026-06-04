@@ -1,9 +1,9 @@
 import { FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApiError, useApiFetch } from '../../../auth/use-api-fetch';
-import { BackButton } from '../../issue-category/back-button';
-
-const ROLES = ['SUPERVISOR', 'TECHNICIAN', 'SYSTEM_ADMIN', 'CUSTOMER'];
+import { ROLES } from '../../../share/role';
+import { BackButton } from '../../../components/back-button';
+import { useUserExistsCheck } from './use-user-exists-check';
 
 export function AddUserPage() {
   const navigate = useNavigate();
@@ -16,25 +16,29 @@ export function AddUserPage() {
   const [isAvailable, setIsAvailable] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [nameDup, setNameDup] = useState(false);
+  const [serverNameDup, setServerNameDup] = useState(false);
 
   const nameTrimmed = name.trim();
   const displayNameTrimmed = displayName.trim();
   const emailTrimmed = email.trim();
+
+  const nameCheck = useUserExistsCheck(name);
+  const nameDup = nameCheck.exists === true || serverNameDup;
 
   const saveDisabled =
     submitting ||
     nameTrimmed === '' ||
     displayNameTrimmed === '' ||
     emailTrimmed === '' ||
-    nameDup;
+    nameDup ||
+    nameCheck.checking;
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (saveDisabled) return;
     setSubmitting(true);
     setSubmitError(null);
-    setNameDup(false);
+    setServerNameDup(false);
     try {
       await apiFetch('/users', {
         method: 'POST',
@@ -51,7 +55,7 @@ export function AddUserPage() {
       navigate('/settings/users');
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        setNameDup(true);
+        setServerNameDup(true);
       } else {
         setSubmitError(err instanceof Error ? err.message : 'Save failed');
       }
@@ -81,7 +85,7 @@ export function AddUserPage() {
             maxLength={255}
             onChange={(e) => {
               setName(e.target.value);
-              if (nameDup) setNameDup(false);
+              if (serverNameDup) setServerNameDup(false);
             }}
             disabled={submitting}
             autoComplete="off"

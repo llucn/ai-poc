@@ -59,7 +59,7 @@ export function LoginPage() {
       <div className="login-card">
         <div className="login-logo">
           <div className="login-logo-text">
-            <span className="login-logo-t1">WORK ORDER</span>
+            <span className="login-logo-t1">AI ASSISTANT</span>
             <span className="login-logo-t2">System</span>
           </div>
         </div>

@@ -25,7 +25,7 @@ export function Topbar({ isNarrow, sidebarOpen, onToggleSidebar }: Props) {
           {sidebarOpen ? <CloseIcon /> : <HamburgerIcon />}
         </button>
       )}
-      <div className="topbar-title">Work Order System</div>
+      <div className="topbar-title">AI Assistant System</div>
       <div className="topbar-spacer" />
       <div className="topbar-actions">
         <ThemeToggle />

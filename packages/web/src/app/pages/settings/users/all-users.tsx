@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApiFetch } from '../../../auth/use-api-fetch';
-import { ConfirmDeleteDialog } from '../../issue-category/confirm-delete-dialog';
+import { ConfirmDeleteDialog } from '../../../components/confirm-delete-dialog';
 
 interface User {
   id: number;

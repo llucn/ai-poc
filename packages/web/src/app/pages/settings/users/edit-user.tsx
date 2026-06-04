@@ -1,9 +1,9 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError, useApiFetch } from '../../../auth/use-api-fetch';
-import { BackButton } from '../../issue-category/back-button';
-
-const ROLES = ['SUPERVISOR', 'TECHNICIAN', 'SYSTEM_ADMIN', 'CUSTOMER'];
+import { ROLES } from '../../../share/role';
+import { BackButton } from '../../../components/back-button';
+import { useUserExistsCheck } from './use-user-exists-check';
 
 interface User {
   id: number;
@@ -24,6 +24,7 @@ export function EditUserPage() {
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [originalName, setOriginalName] = useState('');
   const [name, setName] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
@@ -32,7 +33,7 @@ export function EditUserPage() {
   const [isAvailable, setIsAvailable] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [nameDup, setNameDup] = useState(false);
+  const [serverNameDup, setServerNameDup] = useState(false);
 
   useEffect(() => {
     if (id === null) {
@@ -46,6 +47,7 @@ export function EditUserPage() {
       .then((res) => res.json())
       .then((user: User) => {
         if (cancelled) return;
+        setOriginalName(user.name);
         setName(user.name);
         setDisplayName(user.displayName);
         setEmail(user.email);
@@ -69,19 +71,23 @@ export function EditUserPage() {
   const displayNameTrimmed = displayName.trim();
   const emailTrimmed = email.trim();
 
+  const nameCheck = useUserExistsCheck(name, { ignoreValue: originalName });
+  const nameDup = nameCheck.exists === true || serverNameDup;
+
   const saveDisabled =
     submitting ||
     nameTrimmed === '' ||
     displayNameTrimmed === '' ||
     emailTrimmed === '' ||
-    nameDup;
+    nameDup ||
+    nameCheck.checking;
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (saveDisabled || id === null) return;
     setSubmitting(true);
     setSubmitError(null);
-    setNameDup(false);
+    setServerNameDup(false);
     try {
       await apiFetch(`/users/${id}`, {
         method: 'PUT',
@@ -98,7 +104,7 @@ export function EditUserPage() {
       navigate(`/settings/users/${id}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        setNameDup(true);
+        setServerNameDup(true);
       } else {
         setSubmitError(err instanceof Error ? err.message : 'Save failed');
       }
@@ -166,7 +172,7 @@ export function EditUserPage() {
             maxLength={255}
             onChange={(e) => {
               setName(e.target.value);
-              if (nameDup) setNameDup(false);
+              if (serverNameDup) setServerNameDup(false);
             }}
             disabled={submitting}
             autoComplete="off"

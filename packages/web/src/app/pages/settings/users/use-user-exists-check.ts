@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useApiFetch } from '../../auth/use-api-fetch';
-import type { ExistsResponse } from './types';
-
-type Field = 'name' | 'displayName';
+import { useApiFetch } from '../../../auth/use-api-fetch';
+import type { UserExistsResponse } from './types';
 
 type Options = {
   // When the trimmed input value equals this string the check is skipped
@@ -21,8 +19,7 @@ const INITIAL: CheckState = { checking: false, exists: null, error: null };
 
 const DEBOUNCE_MS = 300;
 
-export function useExistsCheck(
-  field: Field,
+export function useUserExistsCheck(
   value: string,
   options: Options = {},
 ): CheckState {
@@ -44,12 +41,12 @@ export function useExistsCheck(
     setState((prev) => ({ ...prev, checking: true, error: null }));
     let cancelled = false;
     const timer = setTimeout(() => {
-      const params = new URLSearchParams({ [field]: trimmed });
-      apiFetch(`/issue-categories/exists?${params.toString()}`)
+      const params = new URLSearchParams({ name: trimmed });
+      apiFetch(`/users/exists?${params.toString()}`)
         .then((res) => res.json())
-        .then((data: ExistsResponse) => {
+        .then((data: UserExistsResponse) => {
           if (cancelled) return;
-          setState({ checking: false, exists: data[field], error: null });
+          setState({ checking: false, exists: data.name, error: null });
         })
         .catch((err: Error) => {
           if (cancelled) return;
@@ -61,7 +58,7 @@ export function useExistsCheck(
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [apiFetch, field, value, ignoreValue]);
+  }, [apiFetch, value, ignoreValue]);
 
   return state;
 }

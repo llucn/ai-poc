@@ -27,12 +27,24 @@ export class UserService {
     };
   }
 
+  async exists(name: string): Promise<{ name: boolean }> {
+    if (!name.trim()) {
+      return { name: false };
+    }
+    const user = await this.userRepository.findOne({ where: { name: name.trim() } });
+    return { name: !!user };
+  }
+
   async findOne(id: number): Promise<UserEntity> {
     const user = await this.userRepository.findOne({ where: { id } });
     if (!user) {
       throw new NotFoundException(`User with id ${id} not found`);
     }
     return user;
+  }
+
+  async findByName(name: string): Promise<UserEntity | null> {
+    return await this.userRepository.findOne({ where: { name } });
   }
 
   async create(dto: CreateUserDto, createdBy: string): Promise<UserEntity> {

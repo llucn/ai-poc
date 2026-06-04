@@ -20,6 +20,11 @@ import type { CreateUserDto, UpdateUserDto, DeleteUsersDto } from './user.dto';
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
+  @Get('exists')
+  async exists(@Query('name') name?: string) {
+    return this.userService.exists(name || '');
+  }
+
   @Get()
   async findAll(
     @Query('page') page?: string,

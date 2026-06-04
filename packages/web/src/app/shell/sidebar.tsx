@@ -35,7 +35,7 @@ export function Sidebar({ isNarrow, open, onNavigate }: Props) {
     <aside className={className} aria-label="Main navigation">
       <div className="sidebar-logo">
         <div className="logo-text">
-          <span className="t1">WORK ORDER</span>
+          <span className="t1">AI ASSISTANT</span>
           <span className="t2">Operations</span>
         </div>
       </div>

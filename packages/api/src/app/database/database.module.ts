@@ -6,6 +6,8 @@ import { UserEntity } from '../user/user.entity';
 import { AgentEntity } from '../agent/agent.entity';
 import { AgentToolEntity } from '../agent/agent-tool.entity';
 import { AgentSkillEntity } from '../agent/agent-skill.entity';
+import { SessionEntity } from '../session/session.entity';
+import { MessageEntity } from '../session/message.entity';
 
 @Module({
   imports: [
@@ -18,7 +20,7 @@ import { AgentSkillEntity } from '../agent/agent-skill.entity';
         username: cfg.get('db.user', { infer: true }) as string,
         password: cfg.get('db.password', { infer: true }) as string,
         database: cfg.get('db.name', { infer: true }) as string,
-        entities: [UserEntity, AgentEntity, AgentToolEntity, AgentSkillEntity],
+        entities: [UserEntity, AgentEntity, AgentToolEntity, AgentSkillEntity, SessionEntity, MessageEntity],
         synchronize: false,
         logging: ['error', 'warn'],
       }),

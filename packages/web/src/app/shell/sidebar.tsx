@@ -82,6 +82,7 @@ function SidebarGroup({
             <NavLink
               key={child.id}
               to={child.to ?? '#'}
+              end={child.end}
               className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
               onClick={() => {
                 if (isNarrow) onNavigate();

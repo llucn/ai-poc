@@ -12,6 +12,8 @@ import { AllAgentsPage } from './pages/settings/agents/all-agents';
 import { AgentDetailPage } from './pages/settings/agents/agent-detail';
 import { AddAgentPage } from './pages/settings/agents/add-agent';
 import { EditAgentPage } from './pages/settings/agents/edit-agent';
+import { SessionListPage } from './pages/chat/session-list';
+import { ChatPage } from './pages/chat/chat-page';
 import { AppShell } from './shell/app-shell';
 
 export function App() {
@@ -29,6 +31,9 @@ export function App() {
                 <Route path="/dashboard/activity" element={<DemoPage title="Activity" />} />
                 <Route path="/maintenance/schedules" element={<DemoPage title="Schedules" />} />
                 <Route path="/maintenance/history" element={<DemoPage title="History" />} />
+                <Route path="/chat/new" element={<ChatPage />} />
+                <Route path="/chat/:id" element={<ChatPage />} />
+                <Route path="/chat" element={<SessionListPage />} />
                 <Route
                   path="/settings/users"
                   element={

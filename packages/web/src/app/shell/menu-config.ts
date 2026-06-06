@@ -23,6 +23,7 @@ export const DEMO_MENU: MenuItem[] = [
     label: 'Settings',
     children: [
       { id: 'settings-users', label: 'Users', to: '/settings/users', roles: ['SYSTEM_ADMIN'] },
+      { id: 'settings-agents', label: 'Agents', to: '/settings/agents', roles: ['SYSTEM_ADMIN'] },
     ],
   },
 ];

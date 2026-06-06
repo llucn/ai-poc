@@ -1,0 +1,521 @@
+import { useCallback, useEffect, useState } from 'react';
+import {
+  faCircleCheck,
+  faCircleXmark,
+  faPen,
+  faPlus,
+  faTrash,
+} from '@fortawesome/free-solid-svg-icons';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import MarkdownPreview from '@uiw/react-markdown-preview';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useApiFetch } from '../../../auth/use-api-fetch';
+import { BackButton } from '../../../components/back-button';
+import { ConfirmDeleteDialog } from '../../../components/confirm-delete-dialog';
+import { SystemPromptEditor } from './system-prompt-editor';
+import { McpServerDialog } from './mcp-server-dialog';
+import { SkillDialog } from './skill-dialog';
+import type { Agent, AgentSkill, McpServer } from './types';
+
+// Tracks the open dialog (if any) on the detail page.
+type DialogState =
+  | { kind: 'none' }
+  | { kind: 'system-prompt' }
+  | { kind: 'mcp-add' }
+  | { kind: 'mcp-edit'; server: McpServer }
+  | { kind: 'mcp-delete'; server: McpServer }
+  | { kind: 'skill-add' }
+  | { kind: 'skill-edit'; skill: AgentSkill }
+  | { kind: 'skill-delete'; skill: AgentSkill }
+  | { kind: 'agent-delete' };
+
+export function AgentDetailPage() {
+  const { id: idParam } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const apiFetch = useApiFetch();
+  const parsedId = idParam !== undefined ? Number(idParam) : NaN;
+  const id = Number.isFinite(parsedId) ? parsedId : null;
+
+  const [agent, setAgent] = useState<Agent | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<DialogState>({ kind: 'none' });
+  const [busy, setBusy] = useState(false);
+  // Per-server reachability status: undefined=unknown, true/false=test result.
+  const [serverStatus, setServerStatus] = useState<Record<number, boolean>>({});
+
+  const loadAgent = useCallback(async () => {
+    if (id === null) {
+      setError('Invalid agent id');
+      setLoading(false);
+      return;
+    }
+    try {
+      setLoading(true);
+      const res = await apiFetch(`/agents/${id}`);
+      const data: Agent = await res.json();
+      setAgent(data);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load agent');
+    } finally {
+      setLoading(false);
+    }
+  }, [apiFetch, id]);
+
+  useEffect(() => {
+    loadAgent();
+  }, [loadAgent]);
+
+  // PLACEHOLDER_HANDLERS_DONE
+
+  const closeDialog = useCallback(() => {
+    if (!busy) setDialog({ kind: 'none' });
+  }, [busy]);
+
+  // Save the system prompt, then refresh and close.
+  const onSaveSystemPrompt = useCallback(
+    async (value: string | null) => {
+      if (id === null) return;
+      setBusy(true);
+      try {
+        await apiFetch(`/agents/${id}/system-prompt`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ systemPrompt: value }),
+        });
+        await loadAgent();
+        setDialog({ kind: 'none' });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [apiFetch, id, loadAgent]
+  );
+
+  const onDeleteAgent = useCallback(async () => {
+    if (id === null) return;
+    setBusy(true);
+    try {
+      await apiFetch('/agents', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [id] }),
+      });
+      navigate('/settings/agents');
+    } finally {
+      setBusy(false);
+    }
+  }, [apiFetch, id, navigate]);
+
+  const onDeleteMcpServer = useCallback(
+    async (serverId: number) => {
+      if (id === null) return;
+      setBusy(true);
+      try {
+        await apiFetch(`/agents/${id}/mcp-servers/${serverId}`, {
+          method: 'DELETE',
+        });
+        await loadAgent();
+        setDialog({ kind: 'none' });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [apiFetch, id, loadAgent]
+  );
+
+  const onDeleteSkill = useCallback(
+    async (skillId: number) => {
+      if (id === null) return;
+      setBusy(true);
+      try {
+        await apiFetch(`/agents/${id}/skills/${skillId}`, {
+          method: 'DELETE',
+        });
+        await loadAgent();
+        setDialog({ kind: 'none' });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [apiFetch, id, loadAgent]
+  );
+
+  // Test each registered MCP server's reachability for the Status column.
+  const checkServerStatus = useCallback(
+    async (servers: McpServer[]) => {
+      if (id === null) return;
+      const entries = await Promise.all(
+        servers.map(async (s) => {
+          try {
+            const res = await apiFetch(`/agents/${id}/mcp-servers/test`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ serverUrl: s.serverUrl }),
+            });
+            await res.json();
+            return [s.id, true] as const;
+          } catch {
+            return [s.id, false] as const;
+          }
+        })
+      );
+      setServerStatus(Object.fromEntries(entries));
+    },
+    [apiFetch, id]
+  );
+
+  // Refresh server status whenever the tool list changes.
+  useEffect(() => {
+    if (agent?.tools && agent.tools.length > 0) {
+      checkServerStatus(agent.tools);
+    } else {
+      setServerStatus({});
+    }
+  }, [agent?.tools, checkServerStatus]);
+
+  if (loading) {
+    return (
+      <section className="ic-page" aria-busy="true">
+        <header className="ic-page-header">
+          <h1 className="ic-page-title">Loading…</h1>
+        </header>
+      </section>
+    );
+  }
+
+  if (error || !agent) {
+    return (
+      <section className="ic-page" role="alert">
+        <header className="ic-page-header">
+          <h1 className="ic-page-title">Agent not found</h1>
+        </header>
+        <p>
+          <Link to="/settings/agents">Back to list</Link>
+        </p>
+      </section>
+    );
+  }
+
+  const tools = agent.tools ?? [];
+  const skills = agent.skills ?? [];
+
+  return (
+    <section className="ic-page">
+      <header className="ic-page-header">
+        <div className="ic-page-title-group">
+          <BackButton to="/settings/agents" />
+          <h1 className="ic-page-title">Agent #{agent.id}</h1>
+        </div>
+        <div className="ic-page-actions">
+          <button
+            type="button"
+            className="ic-btn ic-btn-primary"
+            onClick={() => navigate(`/settings/agents/${agent.id}/edit`)}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            className="ic-btn ic-btn-secondary"
+            onClick={() => setDialog({ kind: 'agent-delete' })}
+          >
+            - Delete
+          </button>
+        </div>
+      </header>
+
+      <dl className="profile-grid">
+        <dt>ID</dt>
+        <dd>#{agent.id}</dd>
+        <dt>Name</dt>
+        <dd>{agent.name}</dd>
+        <dt>Description</dt>
+        <dd>{agent.description ?? '—'}</dd>
+        <dt>Model Name</dt>
+        <dd>{agent.modelConfig?.modelName ?? '—'}</dd>
+        <dt>Base URL</dt>
+        <dd>{agent.modelConfig?.baseUrl ?? '—'}</dd>
+        <dt>API Key</dt>
+        <dd>{agent.hasApiKey ? '••••••••' : '—'}</dd>
+        <dt>Default</dt>
+        <dd>{agent.isDefault ? 'Yes' : 'No'}</dd>
+      </dl>
+
+      {/* System Prompt */}
+      <section className="ic-section">
+        <div className="ic-section-header">
+          <h2 className="ic-section-title">System Prompt</h2>
+          <button
+            type="button"
+            className="ic-icon-btn"
+            aria-label="Edit system prompt"
+            title="Edit"
+            onClick={() => setDialog({ kind: 'system-prompt' })}
+          >
+            <FontAwesomeIcon icon={faPen} />
+          </button>
+        </div>
+        {agent.systemPrompt ? (
+          <div className="ic-markdown-content" data-color-mode="light">
+            <MarkdownPreview source={agent.systemPrompt} />
+          </div>
+        ) : (
+          <p className="ic-field-hint">No system prompt set.</p>
+        )}
+      </section>
+
+      {/* Tools (MCP Servers) */}
+      <section className="ic-section">
+        <div className="ic-section-header">
+          <h2 className="ic-section-title">Tools</h2>
+          <button
+            type="button"
+            className="ic-icon-btn"
+            aria-label="Add MCP server"
+            title="Add"
+            onClick={() => setDialog({ kind: 'mcp-add' })}
+          >
+            <FontAwesomeIcon icon={faPlus} />
+          </button>
+        </div>
+        <div className="ic-table-wrap">
+          <table className="ic-table">
+            <thead>
+              <tr>
+                <th className="ic-col-id">ID</th>
+                <th>Server Name</th>
+                <th>URL</th>
+                <th>Tools</th>
+                <th className="ic-col-icon">Status</th>
+                <th className="ic-col-actions">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tools.length === 0 ? (
+                <tr>
+                  <td className="ic-table-empty" colSpan={6}>
+                    No MCP servers registered.
+                  </td>
+                </tr>
+              ) : (
+                tools.map((server) => (
+                  <tr key={server.id}>
+                    <td className="ic-col-id">#{server.id}</td>
+                    <td>{server.serverName}</td>
+                    <td className="ic-col-url">{server.serverUrl}</td>
+                    <td>
+                      <div className="ic-tag-list">
+                        {(server.mcpSchema ?? []).map((t, idx) => (
+                          <span className="ic-tag" key={`${t.name}-${idx}`}>
+                            {t.name}
+                          </span>
+                        ))}
+                        {(!server.mcpSchema ||
+                          server.mcpSchema.length === 0) && (
+                          <span className="ic-field-hint">—</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="ic-col-icon">
+                      {serverStatus[server.id] === undefined ? (
+                        <span className="ic-field-hint">…</span>
+                      ) : serverStatus[server.id] ? (
+                        <FontAwesomeIcon
+                          icon={faCircleCheck}
+                          className="ic-icon-yes"
+                          title="Reachable"
+                        />
+                      ) : (
+                        <FontAwesomeIcon
+                          icon={faCircleXmark}
+                          className="ic-icon-no"
+                          title="Unreachable"
+                        />
+                      )}
+                    </td>
+                    <td className="ic-col-actions">
+                      <button
+                        type="button"
+                        className="ic-icon-btn"
+                        aria-label={`Edit ${server.serverName}`}
+                        title="Edit"
+                        onClick={() =>
+                          setDialog({ kind: 'mcp-edit', server })
+                        }
+                      >
+                        <FontAwesomeIcon icon={faPen} />
+                      </button>
+                      <button
+                        type="button"
+                        className="ic-icon-btn ic-icon-btn-danger"
+                        aria-label={`Delete ${server.serverName}`}
+                        title="Delete"
+                        onClick={() =>
+                          setDialog({ kind: 'mcp-delete', server })
+                        }
+                      >
+                        <FontAwesomeIcon icon={faTrash} />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Skills */}
+      <section className="ic-section">
+        <div className="ic-section-header">
+          <h2 className="ic-section-title">Skills</h2>
+          <button
+            type="button"
+            className="ic-icon-btn"
+            aria-label="Add skill"
+            title="Add"
+            onClick={() => setDialog({ kind: 'skill-add' })}
+          >
+            <FontAwesomeIcon icon={faPlus} />
+          </button>
+        </div>
+        <div className="ic-table-wrap">
+          <table className="ic-table">
+            <thead>
+              <tr>
+                <th className="ic-col-id">ID</th>
+                <th>Name</th>
+                <th>Description</th>
+                <th className="ic-col-actions">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {skills.length === 0 ? (
+                <tr>
+                  <td className="ic-table-empty" colSpan={4}>
+                    No skills yet.
+                  </td>
+                </tr>
+              ) : (
+                skills.map((skill) => (
+                  <tr key={skill.id}>
+                    <td className="ic-col-id">#{skill.id}</td>
+                    <td>{skill.name}</td>
+                    <td>{skill.description || '—'}</td>
+                    <td className="ic-col-actions">
+                      <button
+                        type="button"
+                        className="ic-icon-btn"
+                        aria-label={`Edit ${skill.name}`}
+                        title="Edit"
+                        onClick={() => setDialog({ kind: 'skill-edit', skill })}
+                      >
+                        <FontAwesomeIcon icon={faPen} />
+                      </button>
+                      <button
+                        type="button"
+                        className="ic-icon-btn ic-icon-btn-danger"
+                        aria-label={`Delete ${skill.name}`}
+                        title="Delete"
+                        onClick={() =>
+                          setDialog({ kind: 'skill-delete', skill })
+                        }
+                      >
+                        <FontAwesomeIcon icon={faTrash} />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Dialogs */}
+      {dialog.kind === 'system-prompt' && (
+        <SystemPromptEditor
+          initialValue={agent.systemPrompt}
+          busy={busy}
+          onSave={onSaveSystemPrompt}
+          onCancel={closeDialog}
+        />
+      )}
+
+      {dialog.kind === 'mcp-add' && (
+        <McpServerDialog
+          agentId={agent.id}
+          onSaved={() => {
+            loadAgent();
+            setDialog({ kind: 'none' });
+          }}
+          onCancel={closeDialog}
+        />
+      )}
+
+      {dialog.kind === 'mcp-edit' && (
+        <McpServerDialog
+          agentId={agent.id}
+          server={dialog.server}
+          onSaved={() => {
+            loadAgent();
+            setDialog({ kind: 'none' });
+          }}
+          onCancel={closeDialog}
+        />
+      )}
+
+      {dialog.kind === 'mcp-delete' && (
+        <ConfirmDeleteDialog
+          busy={busy}
+          message="Delete tool?"
+          onCancel={closeDialog}
+          onConfirm={() => onDeleteMcpServer(dialog.server.id)}
+        />
+      )}
+
+      {dialog.kind === 'skill-add' && (
+        <SkillDialog
+          agentId={agent.id}
+          onSaved={() => {
+            loadAgent();
+            setDialog({ kind: 'none' });
+          }}
+          onCancel={closeDialog}
+        />
+      )}
+
+      {dialog.kind === 'skill-edit' && (
+        <SkillDialog
+          agentId={agent.id}
+          skill={dialog.skill}
+          onSaved={() => {
+            loadAgent();
+            setDialog({ kind: 'none' });
+          }}
+          onCancel={closeDialog}
+        />
+      )}
+
+      {dialog.kind === 'skill-delete' && (
+        <ConfirmDeleteDialog
+          busy={busy}
+          message="Delete skill?"
+          onCancel={closeDialog}
+          onConfirm={() => onDeleteSkill(dialog.skill.id)}
+        />
+      )}
+
+      {dialog.kind === 'agent-delete' && (
+        <ConfirmDeleteDialog
+          busy={busy}
+          message={`Delete Agent #${agent.id}?`}
+          onCancel={closeDialog}
+          onConfirm={onDeleteAgent}
+        />
+      )}
+    </section>
+  );
+}

@@ -8,6 +8,10 @@ import { AllUsersPage } from './pages/settings/users/all-users';
 import { UserDetailPage } from './pages/settings/users/user-detail';
 import { AddUserPage } from './pages/settings/users/add-user';
 import { EditUserPage } from './pages/settings/users/edit-user';
+import { AllAgentsPage } from './pages/settings/agents/all-agents';
+import { AgentDetailPage } from './pages/settings/agents/agent-detail';
+import { AddAgentPage } from './pages/settings/agents/add-agent';
+import { EditAgentPage } from './pages/settings/agents/edit-agent';
 import { AppShell } from './shell/app-shell';
 
 export function App() {
@@ -54,6 +58,38 @@ export function App() {
                   element={
                     <RequireRole role="SYSTEM_ADMIN">
                       <EditUserPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/agents"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <AllAgentsPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/agents/new"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <AddAgentPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/agents/:id"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <AgentDetailPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/agents/:id/edit"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <EditAgentPage />
                     </RequireRole>
                   }
                 />

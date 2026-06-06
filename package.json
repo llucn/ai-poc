@@ -2,7 +2,10 @@
   "name": "@wo-poc/source",
   "version": "0.0.0",
   "license": "MIT",
-  "scripts": {},
+  "scripts": {
+    "build": "nx run-many -t build",
+    "serve": "nx run-many -t serve"
+  },
   "private": true,
   "devDependencies": {
     "@nestjs/schematics": "^11.0.0",
@@ -43,6 +46,7 @@
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/typeorm": "^11.0.1",
+    "@uiw/react-md-editor": "^4.1.1",
     "aws-jwt-verify": "^5.1.1",
     "axios": "^1.6.0",
     "class-transformer": "^0.5.1",

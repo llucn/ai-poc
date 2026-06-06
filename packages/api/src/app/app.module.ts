@@ -12,6 +12,7 @@ import { DatabaseModule } from './database/database.module';
 import { MeModule } from './me/me.module';
 import { UserEntity } from './user/user.entity';
 import { UserModule } from './user/user.module';
+import { AgentModule } from './agent/agent.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { UserModule } from './user/user.module';
     AuthModule,
     MeModule,
     UserModule,
+    AgentModule,
   ],
   controllers: [AppController],
   providers: [

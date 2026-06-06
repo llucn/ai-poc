@@ -42,7 +42,21 @@
       "PowerShell(Get-ChildItem \"D:\\\\github\\\\llucn\\\\ai-poc\\\\node_modules\\\\@fortawesome\\\\free-solid-svg-icons\\\\\" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match \"faCircleCheck|faCheck\\\\.|faCircleXmark|faXmark|faBan|faCircleMinus\" } | Select-Object Name | Select-Object -First 10)",
       "PowerShell(Get-ChildItem \"D:\\\\github\\\\llucn\\\\ai-poc\\\\node_modules\\\\@fortawesome\\\\free-solid-svg-icons\\\\\" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match \"^faCircleCheck\\\\.js$|^faCircleXmark\\\\.js$|^faCheck\\\\.js$|^faXmark\\\\.js$\" } | Select-Object Name)",
       "Bash(openspec list *)",
-      "Bash(npx openspec *)"
+      "Bash(npx openspec *)",
+      "Bash(grep -iE \"react-markdown|^marked$|sanitize-html|^remark|^rehype|markdown-it\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('web targets:', list\\(d.get\\('targets',{}\\).keys\\(\\)\\)\\)\")",
+      "Bash(npm list *)",
+      "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")",
+      "Bash(node -e \"console.log\\(require\\('@uiw/react-md-editor/package.json'\\).version\\)\")",
+      "Bash(grep -q '\\\\.__TRACKED_VAR__' packages/web/src/styles.css)",
+      "Bash(echo \"=== web typecheck exit: $? ===\")",
+      "Bash(echo \"=== exit $? ===\")",
+      "Bash(echo \"=== api typecheck exit: $? ===\")",
+      "Bash(echo \"=== tsc exit: $? ===\")",
+      "Bash([ -f \"openspec/specs/$cap/spec.md\" ])",
+      "Bash(openspec *)",
+      "Bash([ -d \"$TARGET\" ])",
+      "Bash(exit 1)"
     ]
   }
 }

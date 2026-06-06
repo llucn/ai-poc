@@ -82,3 +82,35 @@ CREATE TABLE IF NOT EXISTS t_agent_skill (
   updated_by VARCHAR(255) NULL,
   INDEX idx_agent_skill_agent_id (agent_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: t_session
+-- Chat sessions. Each session belongs to a single user (user_name).
+-- last_activity_time is denormalized for efficient list sorting.
+CREATE TABLE IF NOT EXISTS t_session (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  user_name VARCHAR(255) NOT NULL,
+  last_activity_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by VARCHAR(255) NOT NULL,
+  updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  updated_by VARCHAR(255) NULL,
+  INDEX idx_session_user_name (user_name),
+  INDEX idx_session_last_activity (last_activity_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: t_message
+-- Messages within a chat session. user_name is the sender; "ASSISTANT"
+-- for bot replies. message_type: 1=Text, 2=Image (only Text supported now).
+CREATE TABLE IF NOT EXISTS t_message (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  session_id INT NOT NULL,
+  user_name VARCHAR(255) NOT NULL,
+  message_type INT NOT NULL DEFAULT 1,
+  content LONGTEXT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by VARCHAR(255) NOT NULL,
+  updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  updated_by VARCHAR(255) NULL,
+  INDEX idx_message_session_id (session_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

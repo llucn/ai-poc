@@ -1,0 +1,40 @@
+export interface Session {
+  id: number;
+  name: string;
+  userName: string;
+  lastActivityTime: string;
+  createdOn: string;
+  createdBy: string;
+  updatedOn?: string | null;
+  updatedBy?: string | null;
+}
+
+export interface Message {
+  id: number;
+  sessionId: number;
+  userName: string;
+  messageType: number;
+  content: string | null;
+  createdOn: string;
+  createdBy: string;
+  updatedOn?: string | null;
+  updatedBy?: string | null;
+}
+
+export interface CreateSessionDto {
+  content: string;
+}
+
+export interface CreateMessageDto {
+  content: string;
+}
+
+export interface CreateSessionResponse {
+  session: Session;
+  messages: Message[];
+}
+
+export interface CreateMessageResponse {
+  userMessage: Message;
+  assistantMessage: Message;
+}

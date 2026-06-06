@@ -7,6 +7,7 @@ export type MenuItem = {
   to?: string;
   children?: MenuItem[];
   roles?: string[];
+  end?: boolean;
 };
 
 export const DEMO_MENU: MenuItem[] = [
@@ -16,6 +17,14 @@ export const DEMO_MENU: MenuItem[] = [
     children: [
       { id: 'dashboard-overview', label: 'Overview', to: '/dashboard/overview' },
       { id: 'dashboard-activity', label: 'Activity', to: '/dashboard/activity' },
+    ],
+  },
+  {
+    id: 'chat',
+    label: 'Chat',
+    children: [
+      { id: 'chat-new-session', label: 'New Session', to: '/chat/new' },
+      { id: 'chat-sessions', label: 'Sessions', to: '/chat', end: true },
     ],
   },
   {

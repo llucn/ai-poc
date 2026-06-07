@@ -14,6 +14,9 @@ export class SessionEntity {
   @Column({ name: 'last_activity_time', type: 'timestamp' })
   lastActivityTime!: Date;
 
+  @Column({ name: 'agent_id', type: 'int', nullable: true })
+  agentId!: number | null;
+
   @Column({ name: 'created_on', type: 'timestamp' })
   createdOn!: Date;
 

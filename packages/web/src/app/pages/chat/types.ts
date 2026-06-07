@@ -35,9 +35,3 @@ export interface CreateSessionResponse {
   session: Session;
   messages: Message[];
 }
-
-export interface CreateMessageResponse {
-  userMessage: Message;
-  thoughtMessage: Message;
-  assistantMessage: Message;
-}

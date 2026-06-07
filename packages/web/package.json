@@ -1,5 +1,8 @@
 {
   "name": "@wo-poc/web",
   "version": "0.0.1",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "@microsoft/fetch-event-source": "^2.0.1"
+  }
 }

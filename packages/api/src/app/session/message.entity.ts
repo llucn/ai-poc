@@ -14,6 +14,11 @@ export class MessageEntity {
   @Column({ name: 'message_type', type: 'int', default: 1 })
   messageType!: number;
 
+  // 1 marks this message as an assistant "thought" rendered as a
+  // collapsible note. 0 is a regular message.
+  @Column({ name: 'is_thought', type: 'int', default: 0 })
+  isThought!: number;
+
   @Column({ type: 'longtext', nullable: true })
   content!: string | null;
 

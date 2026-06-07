@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApiFetch } from '../../auth/use-api-fetch';
 import { useUser } from '../../contexts/UserContext';
+import { ThoughtMessage } from './thought-message';
 import type {
   CreateMessageResponse,
   CreateSessionResponse,
@@ -96,6 +97,7 @@ export function ChatPage() {
         setMessages((prev) => [
           ...prev,
           data.userMessage,
+          data.thoughtMessage,
           data.assistantMessage,
         ]);
       }
@@ -146,6 +148,15 @@ export function ChatPage() {
         )}
 
         {messages.map((msg) => {
+          // Thought messages render as a collapsible note: no avatar, no bubble.
+          if (msg.isThought === 1) {
+            return (
+              <ThoughtMessage
+                key={msg.id}
+                content={msg.content}
+              />
+            );
+          }
           const isAssistant = msg.userName === 'ASSISTANT';
           return (
             <div

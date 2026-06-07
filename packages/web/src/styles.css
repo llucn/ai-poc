@@ -1339,6 +1339,46 @@ textarea.ic-input {
   border: 1px solid var(--border);
 }
 
+/* Thought message — no avatar, no bubble. */
+.chat-thought {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.chat-thought-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 4px 0;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.chat-thought-header:hover {
+  color: var(--text);
+}
+
+.chat-thought-content {
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-left: 2px solid var(--border-hi);
+  color: var(--muted2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
 .chat-error {
   margin: 0 24px;
   padding: 12px;

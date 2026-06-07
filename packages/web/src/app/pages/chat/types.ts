@@ -14,6 +14,8 @@ export interface Message {
   sessionId: number;
   userName: string;
   messageType: number;
+  // 1 = thought (collapsible note), 0 = regular message
+  isThought: number;
   content: string | null;
   createdOn: string;
   createdBy: string;
@@ -36,5 +38,6 @@ export interface CreateSessionResponse {
 
 export interface CreateMessageResponse {
   userMessage: Message;
+  thoughtMessage: Message;
   assistantMessage: Message;
 }

@@ -86,11 +86,13 @@ CREATE TABLE IF NOT EXISTS t_agent_skill (
 -- Table: t_session
 -- Chat sessions. Each session belongs to a single user (user_name).
 -- last_activity_time is denormalized for efficient list sorting.
+-- agent_id associates the session with an Agent for LLM context.
 CREATE TABLE IF NOT EXISTS t_session (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   user_name VARCHAR(255) NOT NULL,
   last_activity_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  agent_id INT NOT NULL,
   created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_by VARCHAR(255) NOT NULL,
   updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,

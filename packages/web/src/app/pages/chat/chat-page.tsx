@@ -1,16 +1,18 @@
 import { faPaperPlane, faRobot } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { fetchEventSource } from '@microsoft/fetch-event-source';
 import MarkdownPreview from '@uiw/react-markdown-preview';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApiFetch } from '../../auth/use-api-fetch';
 import { useUser } from '../../contexts/UserContext';
 import { ThoughtMessage } from './thought-message';
-import type {
-  CreateMessageResponse,
-  CreateSessionResponse,
-  Message,
-} from './types';
+import type { CreateSessionResponse, Message } from './types';
+
+const THINKING_ID = -1;
+// Temp id for the user's own bubble shown immediately on send. The real
+// persisted user message is loaded next time the session is reopened.
+const PENDING_USER_ID = -2;
 
 export function ChatPage() {
   const { id: idParam } = useParams<{ id: string }>();
@@ -27,20 +29,18 @@ export function ChatPage() {
   const [loading, setLoading] = useState(!isNew);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Load messages for existing session
   useEffect(() => {
-    // Clear previous session state when route changes
     setMessages([]);
     setError(null);
 
-    // New session: no messages to load
     if (sessionId === null || !Number.isFinite(sessionId)) {
       setLoading(false);
       return;
     }
 
-    // Existing session: load messages
     let cancelled = false;
     setLoading(true);
     apiFetch(`/sessions/${sessionId}/messages`)
@@ -67,6 +67,10 @@ export function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const removeThinker = () => {
+    setMessages((prev) => prev.filter((m) => m.id !== THINKING_ID));
+  };
+
   const handleSend = useCallback(async () => {
     const content = input.trim();
     if (!content || sending) return;
@@ -77,38 +81,130 @@ export function ChatPage() {
 
     try {
       if (sessionId === null) {
-        // First message: create session
+        // First message: create session (normal POST, not SSE).
+        // Show user bubble + Thinking immediately while waiting for LLM.
+        const pendingUserMsg: Message = {
+          id: PENDING_USER_ID,
+          sessionId: 0,
+          userName: user?.username || '',
+          messageType: 1,
+          isThought: 0,
+          content,
+          createdOn: '',
+          createdBy: '',
+        };
+        const thinkingMsg: Message = {
+          id: THINKING_ID,
+          sessionId: 0,
+          userName: 'ASSISTANT',
+          messageType: 1,
+          isThought: 0,
+          content: null,
+          createdOn: '',
+          createdBy: '',
+        };
+        setMessages([pendingUserMsg, thinkingMsg]);
+
         const res = await apiFetch('/sessions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ content }),
         });
         const data: CreateSessionResponse = await res.json();
+        // Replace temp messages with real ones from server
         setMessages(data.messages);
         navigate(`/chat/${data.session.id}`, { replace: true });
+        setSending(false);
+        // Refocus textarea for next message
+        inputRef.current?.focus();
       } else {
-        // Subsequent messages
-        const res = await apiFetch(`/sessions/${sessionId}/messages`, {
+        // Subsequent messages: use SSE.
+        // Append the user's bubble immediately so they see their own message,
+        // then a "Thinking..." placeholder while waiting for the LLM.
+        const pendingUserMsg: Message = {
+          id: PENDING_USER_ID,
+          sessionId,
+          userName: user?.username || '',
+          messageType: 1,
+          isThought: 0,
+          content,
+          createdOn: '',
+          createdBy: '',
+        };
+        const thinkingMsg: Message = {
+          id: THINKING_ID,
+          sessionId,
+          userName: 'ASSISTANT',
+          messageType: 1,
+          isThought: 0,
+          content: null,
+          createdOn: '',
+          createdBy: '',
+        };
+        setMessages((prev) => [...prev, pendingUserMsg, thinkingMsg]);
+
+        const url = `/api/sessions/${sessionId}/messages`;
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        if (user) {
+          headers['X-User-Name'] = user.username;
+          if (user.role) {
+            headers['X-User-Role'] = user.role;
+          }
+        }
+
+        await fetchEventSource(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({ content }),
+          onmessage(ev) {
+            if (ev.event === 'thought_created' || ev.event === 'message_created') {
+              try {
+                const msg: Message = JSON.parse(ev.data);
+                setMessages((prev) =>
+                  prev.filter((m) => m.id !== THINKING_ID).concat(msg)
+                );
+              } catch {
+                // ignore parse errors
+              }
+            } else if (ev.event === 'error') {
+              try {
+                const errData = JSON.parse(ev.data);
+                setError(errData.message || 'LLM call failed');
+              } catch {
+                setError('LLM call failed');
+              }
+              removeThinker();
+            }
+          },
+          onerror(err) {
+            setError(
+              err instanceof Error ? err.message : 'Connection failed'
+            );
+            removeThinker();
+            setSending(false);
+            throw err; // stop retries
+          },
+          onclose() {
+            removeThinker();
+            setSending(false);
+            // Refocus textarea for next message
+            inputRef.current?.focus();
+          },
         });
-        const data: CreateMessageResponse = await res.json();
-        setMessages((prev) => [
-          ...prev,
-          data.userMessage,
-          data.thoughtMessage,
-          data.assistantMessage,
-        ]);
+
+        // fetchEventSource resolves when stream ends
+        removeThinker();
+        setSending(false);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send message');
-      // Restore the input so the user doesn't lose their text
       setInput(content);
-    } finally {
+      removeThinker();
       setSending(false);
     }
-  }, [input, sending, sessionId, apiFetch, navigate]);
+  }, [input, sending, sessionId, apiFetch, navigate, user]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -148,14 +244,18 @@ export function ChatPage() {
         )}
 
         {messages.map((msg) => {
-          // Thought messages render as a collapsible note: no avatar, no bubble.
-          if (msg.isThought === 1) {
+          // "Thinking..." placeholder
+          if (msg.id === THINKING_ID) {
             return (
-              <ThoughtMessage
-                key={msg.id}
-                content={msg.content}
-              />
+              <div key="thinking" className="chat-thinking">
+                <span className="chat-thinking-spinner" />
+                <span>Thinking...</span>
+              </div>
             );
+          }
+          // Thought messages render as a collapsible note
+          if (msg.isThought === 1) {
+            return <ThoughtMessage key={msg.id} content={msg.content} />;
           }
           const isAssistant = msg.userName === 'ASSISTANT';
           return (
@@ -196,6 +296,7 @@ export function ChatPage() {
 
       <div className="chat-input-bar">
         <textarea
+          ref={inputRef}
           className="chat-input"
           value={input}
           onChange={(e) => setInput(e.target.value)}

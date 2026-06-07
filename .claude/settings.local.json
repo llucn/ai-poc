@@ -62,7 +62,9 @@
       "Bash(mkdir -p openspec/specs/__TRACKED_VAR__)",
       "Bash(cp -v openspec/changes/chat-ui/specs/__TRACKED_VAR__/spec.md openspec/specs/__TRACKED_VAR__/spec.md)",
       "Bash(echo \"=== api: $? ===\")",
-      "Bash(echo \"=== web: $? ===\")"
+      "Bash(echo \"=== web: $? ===\")",
+      "Bash(echo \"=== web tsc: $? ===\")",
+      "Bash(grep -c \"\\\\.md$\")"
     ]
   }
 }

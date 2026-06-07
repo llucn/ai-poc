@@ -1,20 +1,28 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { SessionEntity } from './session.entity';
 import { MessageEntity } from './message.entity';
+import { AgentEntity } from '../agent/agent.entity';
+import { LlmService } from '../llm/llm.service';
 import type { CreateSessionDto, CreateMessageDto } from './session.dto';
+import type { Response } from 'express';
 
 const ASSISTANT_USER = 'ASSISTANT';
 
 @Injectable()
 export class SessionService {
+  private readonly logger = new Logger(SessionService.name);
+
   constructor(
     @InjectRepository(SessionEntity)
     private readonly sessionRepository: Repository<SessionEntity>,
     @InjectRepository(MessageEntity)
     private readonly messageRepository: Repository<MessageEntity>,
-    private readonly dataSource: DataSource
+    @InjectRepository(AgentEntity)
+    private readonly agentRepository: Repository<AgentEntity>,
+    private readonly dataSource: DataSource,
+    private readonly llmService: LlmService
   ) {}
 
   /**
@@ -50,10 +58,15 @@ export class SessionService {
   /**
    * Create a new session with the first message (lazy creation).
    * Session name = first 200 chars of message content.
-   * Echo flow inside the transaction creates three messages in time order:
-   *   1. user message
-   *   2. assistant Thought (is_thought = 1)
-   *   3. assistant reply
+   * Queries the default Agent (is_default=1) and associates it with the session.
+   *
+   * Flow:
+   *   1. (txn) Create session + user message.
+   *   2. (no txn) Call LLM with system_prompt + first user message.
+   *   3. (txn) Save Thought + assistant reply with the LLM output.
+   *
+   * The LLM call is outside the DB transaction so the connection isn't held
+   * during the network round-trip.
    */
   async createSessionWithFirstMessage(
     dto: CreateSessionDto,
@@ -63,80 +76,115 @@ export class SessionService {
     const now = new Date();
     const sessionName = dto.content.substring(0, 200);
 
-    return await this.dataSource.transaction(async (manager) => {
-      // Create session
-      const session = manager.create(SessionEntity, {
-        name: sessionName,
-        userName,
-        lastActivityTime: now,
-        createdOn: now,
-        createdBy,
-      });
-      const savedSession = await manager.save(SessionEntity, session);
-
-      // 1. User message
-      const userMessage = manager.create(MessageEntity, {
-        sessionId: savedSession.id,
-        userName,
-        messageType: 1,
-        isThought: 0,
-        content: dto.content,
-        createdOn: now,
-        createdBy,
-      });
-      const savedUserMsg = await manager.save(MessageEntity, userMessage);
-
-      // 2. Thought message (assistant) — +1ms ensures it sorts after user.
-      const thoughtMessage = manager.create(MessageEntity, {
-        sessionId: savedSession.id,
-        userName: ASSISTANT_USER,
-        messageType: 1,
-        isThought: 1,
-        content: dto.content,
-        createdOn: new Date(now.getTime() + 1),
-        createdBy: `assistant/${createdBy}`,
-      });
-      const savedThoughtMsg = await manager.save(
-        MessageEntity,
-        thoughtMessage
-      );
-
-      // 3. Assistant reply — +2ms ensures it sorts after the Thought.
-      const assistantMessage = manager.create(MessageEntity, {
-        sessionId: savedSession.id,
-        userName: ASSISTANT_USER,
-        messageType: 1,
-        isThought: 0,
-        content: dto.content,
-        createdOn: new Date(now.getTime() + 2),
-        createdBy: `assistant/${createdBy}`,
-      });
-      const savedAssistantMsg = await manager.save(
-        MessageEntity,
-        assistantMessage
-      );
-
-      return {
-        session: savedSession,
-        messages: [savedUserMsg, savedThoughtMsg, savedAssistantMsg],
-      };
+    // Query default Agent
+    const defaultAgent = await this.agentRepository.findOne({
+      where: { isDefault: 1 },
     });
+    if (!defaultAgent) {
+      throw new NotFoundException(
+        'Default agent not configured. Please contact admin.'
+      );
+    }
+
+    // Step 1: create session + user message in a short transaction.
+    const { savedSession, savedUserMsg } = await this.dataSource.transaction(
+      async (manager) => {
+        const session = manager.create(SessionEntity, {
+          name: sessionName,
+          userName,
+          agentId: defaultAgent.id,
+          lastActivityTime: now,
+          createdOn: now,
+          createdBy,
+        });
+        const savedSession = await manager.save(SessionEntity, session);
+
+        const userMessage = manager.create(MessageEntity, {
+          sessionId: savedSession.id,
+          userName,
+          messageType: 1,
+          isThought: 0,
+          content: dto.content,
+          createdOn: now,
+          createdBy,
+        });
+        const savedUserMsg = await manager.save(MessageEntity, userMessage);
+
+        return { savedSession, savedUserMsg };
+      }
+    );
+
+    // Step 2: call LLM outside the transaction.
+    const systemPrompt =
+      defaultAgent.systemPrompt || 'You are a helpful assistant.';
+    const llmMessages: {
+      role: 'system' | 'user' | 'assistant';
+      content: string;
+    }[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: dto.content },
+    ];
+
+    this.logger.log(
+      `Calling LLM for new session ${savedSession.id} with ${llmMessages.length} messages`
+    );
+    const llmOutput = await this.llmService.callLlm(defaultAgent, llmMessages);
+    this.logger.log(
+      `LLM output for session ${savedSession.id}: ${llmOutput}`
+    );
+
+    // Step 3: save Thought + assistant reply in a second short transaction.
+    const { savedThoughtMsg, savedAssistantMsg } =
+      await this.dataSource.transaction(async (manager) => {
+        const thoughtMessage = manager.create(MessageEntity, {
+          sessionId: savedSession.id,
+          userName: ASSISTANT_USER,
+          messageType: 1,
+          isThought: 1,
+          content: llmOutput,
+          createdOn: new Date(now.getTime() + 1),
+          createdBy: `assistant/${createdBy}`,
+        });
+        const savedThoughtMsg = await manager.save(
+          MessageEntity,
+          thoughtMessage
+        );
+
+        const assistantMessage = manager.create(MessageEntity, {
+          sessionId: savedSession.id,
+          userName: ASSISTANT_USER,
+          messageType: 1,
+          isThought: 0,
+          content: llmOutput,
+          createdOn: new Date(now.getTime() + 2),
+          createdBy: `assistant/${createdBy}`,
+        });
+        const savedAssistantMsg = await manager.save(
+          MessageEntity,
+          assistantMessage
+        );
+
+        return { savedThoughtMsg, savedAssistantMsg };
+      });
+
+    return {
+      session: savedSession,
+      messages: [savedUserMsg, savedThoughtMsg, savedAssistantMsg],
+    };
   }
 
   /**
-   * Send a message to an existing session. Creates user message, a Thought,
-   * then an echo assistant reply in time order. Updates lastActivityTime.
+   * Send a message to an existing session. Saves the user message, calls LLM,
+   * saves thought + assistant reply, and streams all events via SSE to the response.
+   * Does not return a value — writes directly to the response object.
    */
   async createMessage(
     sessionId: number,
     dto: CreateMessageDto,
     userName: string,
-    createdBy: string
-  ): Promise<{
-    userMessage: MessageEntity;
-    thoughtMessage: MessageEntity;
-    assistantMessage: MessageEntity;
-  }> {
+    createdBy: string,
+    res: Response
+  ): Promise<void> {
     // Verify session belongs to user
     const session = await this.sessionRepository.findOne({
       where: { id: sessionId, userName },
@@ -145,11 +193,21 @@ export class SessionService {
       throw new NotFoundException(`Session with id ${sessionId} not found`);
     }
 
+    // 5.2: Query session's agent to get system_prompt and model_config
+    const agent = await this.agentRepository.findOne({
+      where: { id: session.agentId || 0 },
+    });
+    if (!agent) {
+      throw new NotFoundException(
+        `Agent with id ${session.agentId} not found for session ${sessionId}`
+      );
+    }
+
     const now = new Date();
 
-    return await this.dataSource.transaction(async (manager) => {
-      // 1. User message
-      const userMessage = manager.create(MessageEntity, {
+    try {
+      // Save user message first
+      const userMessage = this.messageRepository.create({
         sessionId,
         userName,
         messageType: 1,
@@ -158,50 +216,82 @@ export class SessionService {
         createdOn: now,
         createdBy,
       });
-      const savedUserMsg = await manager.save(MessageEntity, userMessage);
+      await this.messageRepository.save(userMessage);
 
-      // 2. Thought message — +1ms ensures it sorts after user.
-      const thoughtMessage = manager.create(MessageEntity, {
+      // 5.3: Query session history (last 200 messages DESC, then reverse to ASC)
+      const history = await this.messageRepository.find({
+        where: { sessionId },
+        order: { createdOn: 'DESC', id: 'DESC' },
+        take: 200,
+      });
+      history.reverse();
+
+      // 5.4: Build messages array for LLM
+      const systemPrompt = agent.systemPrompt || 'You are a helpful assistant.';
+      const llmMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+        { role: 'system', content: systemPrompt },
+        ...history.map((msg) => ({
+          role: (msg.userName === ASSISTANT_USER ? 'assistant' : 'user') as
+            | 'user'
+            | 'assistant',
+          content: msg.content || '',
+        })),
+      ];
+
+      // Call LLM
+      this.logger.log(`Calling LLM for session ${sessionId} with ${llmMessages.length} messages`);
+      const llmOutput = await this.llmService.callLlm(agent, llmMessages);
+      this.logger.log(`LLM output for session ${sessionId}: ${llmOutput}`);
+
+      // 5.5: Save Thought message (is_thought=1)
+      const thoughtMessage = this.messageRepository.create({
         sessionId,
         userName: ASSISTANT_USER,
         messageType: 1,
         isThought: 1,
-        content: dto.content,
+        content: llmOutput,
         createdOn: new Date(now.getTime() + 1),
         createdBy: `assistant/${createdBy}`,
       });
-      const savedThoughtMsg = await manager.save(
-        MessageEntity,
-        thoughtMessage
-      );
+      const savedThoughtMsg = await this.messageRepository.save(thoughtMessage);
 
-      // 3. Assistant reply — +2ms ensures it sorts after the Thought.
-      const assistantMessage = manager.create(MessageEntity, {
+      // SSE event: thought_created
+      res.write(`event: thought_created\n`);
+      res.write(`data: ${JSON.stringify(savedThoughtMsg)}\n\n`);
+
+      // 5.6: Save assistant reply (is_thought=0)
+      const assistantMessage = this.messageRepository.create({
         sessionId,
         userName: ASSISTANT_USER,
         messageType: 1,
         isThought: 0,
-        content: dto.content,
+        content: llmOutput,
         createdOn: new Date(now.getTime() + 2),
         createdBy: `assistant/${createdBy}`,
       });
-      const savedAssistantMsg = await manager.save(
-        MessageEntity,
-        assistantMessage
-      );
+      const savedAssistantMsg =
+        await this.messageRepository.save(assistantMessage);
+
+      // SSE event: message_created
+      res.write(`event: message_created\n`);
+      res.write(`data: ${JSON.stringify(savedAssistantMsg)}\n\n`);
 
       // Update session last_activity_time
       session.lastActivityTime = now;
       session.updatedOn = now;
       session.updatedBy = createdBy;
-      await manager.save(SessionEntity, session);
-
-      return {
-        userMessage: savedUserMsg,
-        thoughtMessage: savedThoughtMsg,
-        assistantMessage: savedAssistantMsg,
-      };
-    });
+      await this.sessionRepository.save(session);
+    } catch (err) {
+      // 5.7: SSE event: error
+      const errorMessage =
+        err instanceof Error ? err.message : 'Unknown error occurred';
+      this.logger.error(`createMessage SSE error: ${errorMessage}`);
+      res.write(`event: error\n`);
+      res.write(`data: ${JSON.stringify({ message: errorMessage })}\n\n`);
+    } finally {
+      // 5.8: Close SSE connection
+      res.end();
+    }
   }
 
   /**
@@ -236,7 +326,7 @@ export class SessionService {
       if (validIds.length === 0) return 0;
 
       // Delete messages first
-      await manager.delete(MessageEntity, { sessionId: validIds as any });
+      await manager.delete(MessageEntity, { sessionId: In(validIds) });
       // Delete sessions
       const result = await manager.delete(SessionEntity, validIds);
       return result.affected ?? 0;

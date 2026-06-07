@@ -8,7 +8,9 @@ import {
   ParseIntPipe,
   Post,
   Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { SessionService } from './session.service';
 import type {
@@ -74,10 +76,16 @@ export class SessionController {
   async createMessage(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CreateMessageDto,
-    @CurrentUser() user: any
+    @CurrentUser() user: any,
+    @Res() res: Response
   ) {
+    // 5.1: Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
     const userName = user?.userName || user?.username || '';
     const createdBy = userName || 'system';
-    return this.sessionService.createMessage(id, dto, userName, createdBy);
+    await this.sessionService.createMessage(id, dto, userName, createdBy, res);
   }
 }

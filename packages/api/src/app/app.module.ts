@@ -14,6 +14,7 @@ import { UserEntity } from './user/user.entity';
 import { UserModule } from './user/user.module';
 import { AgentModule } from './agent/agent.module';
 import { SessionModule } from './session/session.module';
+import { LlmModule } from './llm/llm.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { SessionModule } from './session/session.module';
     UserModule,
     AgentModule,
     SessionModule,
+    LlmModule,
   ],
   controllers: [AppController],
   providers: [

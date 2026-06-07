@@ -10,6 +10,51 @@ import type { Response } from 'express';
 
 const ASSISTANT_USER = 'ASSISTANT';
 
+/**
+ * Parse the LLM's raw output into the content shown as the Assistant reply.
+ *
+ * The LLM is instructed to reply with a single JSON object, one of:
+ *   {"thought": "...", "final_answer": "..."}
+ *   {"thought": "...", "action": {"tool": "...", "params": {...}}}
+ *
+ * Reply content is determined by, in priority order:
+ *   1. JSON.parse fails            -> error message
+ *   2. has `final_answer`          -> its value (stringified if not a string)
+ *   3. has `action` (no final_*)   -> its value (temporary fallback; tool calls
+ *                                     are handled in a later change)
+ *   4. neither present             -> error message about the missing field
+ *
+ * The Thought message keeps the raw output unchanged; only the reply uses this.
+ * Always returns a string so it can be persisted safely.
+ */
+export function parseAssistantReply(llmOutput: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(llmOutput);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : 'unknown error';
+    return `Failed to parse LLM output as JSON: ${detail}. Raw output: ${llmOutput}`;
+  }
+
+  if (typeof parsed !== 'object' || parsed === null) {
+    return `LLM output is not a JSON object. Raw output: ${llmOutput}`;
+  }
+
+  const obj = parsed as Record<string, unknown>;
+
+  if ('final_answer' in obj) {
+    const value = obj.final_answer;
+    return typeof value === 'string' ? value : JSON.stringify(value);
+  }
+
+  if ('action' in obj) {
+    const value = obj.action;
+    return typeof value === 'string' ? value : JSON.stringify(value);
+  }
+
+  return `LLM output is missing both "final_answer" and "action". Raw output: ${llmOutput}`;
+}
+
 @Injectable()
 export class SessionService {
   private readonly logger = new Logger(SessionService.name);
@@ -155,7 +200,7 @@ export class SessionService {
           userName: ASSISTANT_USER,
           messageType: 1,
           isThought: 0,
-          content: llmOutput,
+          content: parseAssistantReply(llmOutput),
           createdOn: new Date(now.getTime() + 2),
           createdBy: `assistant/${createdBy}`,
         });
@@ -265,7 +310,7 @@ export class SessionService {
         userName: ASSISTANT_USER,
         messageType: 1,
         isThought: 0,
-        content: llmOutput,
+        content: parseAssistantReply(llmOutput),
         createdOn: new Date(now.getTime() + 2),
         createdBy: `assistant/${createdBy}`,
       });

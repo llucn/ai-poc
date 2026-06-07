@@ -102,11 +102,14 @@ CREATE TABLE IF NOT EXISTS t_session (
 -- Table: t_message
 -- Messages within a chat session. user_name is the sender; "ASSISTANT"
 -- for bot replies. message_type: 1=Text, 2=Image (only Text supported now).
+-- is_thought: 1 marks an assistant "thought" entry rendered as a
+-- collapsible note in the chat timeline; 0 is a regular message.
 CREATE TABLE IF NOT EXISTS t_message (
   id INT AUTO_INCREMENT PRIMARY KEY,
   session_id INT NOT NULL,
   user_name VARCHAR(255) NOT NULL,
   message_type INT NOT NULL DEFAULT 1,
+  is_thought INT NOT NULL DEFAULT 0,
   content LONGTEXT NULL,
   created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_by VARCHAR(255) NOT NULL,

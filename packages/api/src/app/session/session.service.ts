@@ -50,7 +50,10 @@ export class SessionService {
   /**
    * Create a new session with the first message (lazy creation).
    * Session name = first 200 chars of message content.
-   * Also creates the echo assistant reply in the same transaction.
+   * Echo flow inside the transaction creates three messages in time order:
+   *   1. user message
+   *   2. assistant Thought (is_thought = 1)
+   *   3. assistant reply
    */
   async createSessionWithFirstMessage(
     dto: CreateSessionDto,
@@ -71,24 +74,41 @@ export class SessionService {
       });
       const savedSession = await manager.save(SessionEntity, session);
 
-      // Create user message
+      // 1. User message
       const userMessage = manager.create(MessageEntity, {
         sessionId: savedSession.id,
         userName,
         messageType: 1,
+        isThought: 0,
         content: dto.content,
         createdOn: now,
         createdBy,
       });
       const savedUserMsg = await manager.save(MessageEntity, userMessage);
 
-      // Create echo assistant message
+      // 2. Thought message (assistant) — +1ms ensures it sorts after user.
+      const thoughtMessage = manager.create(MessageEntity, {
+        sessionId: savedSession.id,
+        userName: ASSISTANT_USER,
+        messageType: 1,
+        isThought: 1,
+        content: dto.content,
+        createdOn: new Date(now.getTime() + 1),
+        createdBy: `assistant/${createdBy}`,
+      });
+      const savedThoughtMsg = await manager.save(
+        MessageEntity,
+        thoughtMessage
+      );
+
+      // 3. Assistant reply — +2ms ensures it sorts after the Thought.
       const assistantMessage = manager.create(MessageEntity, {
         sessionId: savedSession.id,
         userName: ASSISTANT_USER,
         messageType: 1,
+        isThought: 0,
         content: dto.content,
-        createdOn: new Date(now.getTime() + 1), // 1ms later for ordering
+        createdOn: new Date(now.getTime() + 2),
         createdBy: `assistant/${createdBy}`,
       });
       const savedAssistantMsg = await manager.save(
@@ -98,21 +118,25 @@ export class SessionService {
 
       return {
         session: savedSession,
-        messages: [savedUserMsg, savedAssistantMsg],
+        messages: [savedUserMsg, savedThoughtMsg, savedAssistantMsg],
       };
     });
   }
 
   /**
-   * Send a message to an existing session. Creates the user message and
-   * an echo assistant reply. Updates session.lastActivityTime.
+   * Send a message to an existing session. Creates user message, a Thought,
+   * then an echo assistant reply in time order. Updates lastActivityTime.
    */
   async createMessage(
     sessionId: number,
     dto: CreateMessageDto,
     userName: string,
     createdBy: string
-  ): Promise<{ userMessage: MessageEntity; assistantMessage: MessageEntity }> {
+  ): Promise<{
+    userMessage: MessageEntity;
+    thoughtMessage: MessageEntity;
+    assistantMessage: MessageEntity;
+  }> {
     // Verify session belongs to user
     const session = await this.sessionRepository.findOne({
       where: { id: sessionId, userName },
@@ -124,24 +148,41 @@ export class SessionService {
     const now = new Date();
 
     return await this.dataSource.transaction(async (manager) => {
-      // Create user message
+      // 1. User message
       const userMessage = manager.create(MessageEntity, {
         sessionId,
         userName,
         messageType: 1,
+        isThought: 0,
         content: dto.content,
         createdOn: now,
         createdBy,
       });
       const savedUserMsg = await manager.save(MessageEntity, userMessage);
 
-      // Create echo assistant message
+      // 2. Thought message — +1ms ensures it sorts after user.
+      const thoughtMessage = manager.create(MessageEntity, {
+        sessionId,
+        userName: ASSISTANT_USER,
+        messageType: 1,
+        isThought: 1,
+        content: dto.content,
+        createdOn: new Date(now.getTime() + 1),
+        createdBy: `assistant/${createdBy}`,
+      });
+      const savedThoughtMsg = await manager.save(
+        MessageEntity,
+        thoughtMessage
+      );
+
+      // 3. Assistant reply — +2ms ensures it sorts after the Thought.
       const assistantMessage = manager.create(MessageEntity, {
         sessionId,
         userName: ASSISTANT_USER,
         messageType: 1,
+        isThought: 0,
         content: dto.content,
-        createdOn: new Date(now.getTime() + 1),
+        createdOn: new Date(now.getTime() + 2),
         createdBy: `assistant/${createdBy}`,
       });
       const savedAssistantMsg = await manager.save(
@@ -155,7 +196,11 @@ export class SessionService {
       session.updatedBy = createdBy;
       await manager.save(SessionEntity, session);
 
-      return { userMessage: savedUserMsg, assistantMessage: savedAssistantMsg };
+      return {
+        userMessage: savedUserMsg,
+        thoughtMessage: savedThoughtMsg,
+        assistantMessage: savedAssistantMsg,
+      };
     });
   }
 

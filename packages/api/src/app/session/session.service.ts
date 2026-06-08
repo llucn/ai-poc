@@ -4,55 +4,134 @@ import { Repository, DataSource, In } from 'typeorm';
 import { SessionEntity } from './session.entity';
 import { MessageEntity } from './message.entity';
 import { AgentEntity } from '../agent/agent.entity';
+import { AgentToolEntity } from '../agent/agent-tool.entity';
 import { LlmService } from '../llm/llm.service';
+import { McpClientService } from '../mcp/mcp-client.service';
 import type { CreateSessionDto, CreateMessageDto } from './session.dto';
 import type { Response } from 'express';
 
 const ASSISTANT_USER = 'ASSISTANT';
+const MAX_TOOL_CALLS = 20;
 
 /**
- * Parse the LLM's raw output into the content shown as the Assistant reply.
+ * Result type from parsing the LLM's raw output.
+ *
+ * - `final_answer`: LLM produced a final reply for the user; the loop should end
+ * - `action`: LLM requested a tool call; the loop should execute the tool and continue
+ * - `error`: LLM output could not be parsed or was malformed; the loop should end
+ */
+export type ParsedReply =
+  | { type: 'final_answer'; content: string }
+  | {
+      type: 'action';
+      content: string;
+      actionData: { tool: string; params: unknown };
+    }
+  | { type: 'error'; content: string };
+
+/**
+ * Parse the LLM's raw output into a structured result.
  *
  * The LLM is instructed to reply with a single JSON object, one of:
  *   {"thought": "...", "final_answer": "..."}
  *   {"thought": "...", "action": {"tool": "...", "params": {...}}}
  *
- * Reply content is determined by, in priority order:
- *   1. JSON.parse fails            -> error message
- *   2. has `final_answer`          -> its value (stringified if not a string)
- *   3. has `action` (no final_*)   -> its value (temporary fallback; tool calls
- *                                     are handled in a later change)
- *   4. neither present             -> error message about the missing field
- *
- * The Thought message keeps the raw output unchanged; only the reply uses this.
- * Always returns a string so it can be persisted safely.
+ * Returns a tagged union so the caller can decide how to handle each case
+ * (display reply, execute tool, or surface an error).
  */
-export function parseAssistantReply(llmOutput: string): string {
+export function parseAssistantReply(llmOutput: string): ParsedReply {
   let parsed: unknown;
   try {
     parsed = JSON.parse(llmOutput);
   } catch (err) {
     const detail = err instanceof Error ? err.message : 'unknown error';
-    return `Failed to parse LLM output as JSON: ${detail}. Raw output: ${llmOutput}`;
+    return {
+      type: 'error',
+      content: `Failed to parse LLM output as JSON: ${detail}. Raw output: ${llmOutput}`,
+    };
   }
 
   if (typeof parsed !== 'object' || parsed === null) {
-    return `LLM output is not a JSON object. Raw output: ${llmOutput}`;
+    return {
+      type: 'error',
+      content: `LLM output is not a JSON object. Raw output: ${llmOutput}`,
+    };
   }
 
   const obj = parsed as Record<string, unknown>;
 
   if ('final_answer' in obj) {
     const value = obj.final_answer;
-    return typeof value === 'string' ? value : JSON.stringify(value);
+    return {
+      type: 'final_answer',
+      content: typeof value === 'string' ? value : JSON.stringify(value),
+    };
   }
 
   if ('action' in obj) {
-    const value = obj.action;
-    return typeof value === 'string' ? value : JSON.stringify(value);
+    const action = obj.action;
+    if (
+      typeof action === 'object' &&
+      action !== null &&
+      'tool' in action &&
+      typeof (action as Record<string, unknown>).tool === 'string'
+    ) {
+      const a = action as { tool: string; params?: unknown };
+      return {
+        type: 'action',
+        content: JSON.stringify(action),
+        actionData: { tool: a.tool, params: a.params ?? {} },
+      };
+    }
+    return {
+      type: 'error',
+      content: `Action field is malformed (missing tool). Raw output: ${llmOutput}`,
+    };
   }
 
-  return `LLM output is missing both "final_answer" and "action". Raw output: ${llmOutput}`;
+  return {
+    type: 'error',
+    content: `LLM output is missing both "final_answer" and "action". Raw output: ${llmOutput}`,
+  };
+}
+
+/**
+ * Parse a tool name in the format `mcp__${id}__${toolName}`.
+ *
+ * The tool name itself may contain underscores, so we split on the first
+ * two `__` delimiters only. Returns null if the format doesn't match.
+ *
+ * Examples:
+ *   "mcp__5__getWeatherForecastByLocation" → { agentToolId: 5, toolName: "getWeatherForecastByLocation" }
+ *   "mcp__12__get_user_profile"             → { agentToolId: 12, toolName: "get_user_profile" }
+ *   "invalid_format"                         → null
+ */
+export function parseToolName(
+  tool: string
+): { agentToolId: number; toolName: string } | null {
+  const match = /^mcp__(\d+)__(.+)$/.exec(tool);
+  if (!match) return null;
+  const agentToolId = Number(match[1]);
+  const toolName = match[2];
+  if (!Number.isFinite(agentToolId) || toolName.length === 0) return null;
+  return { agentToolId, toolName };
+}
+
+/**
+ * Build an observation message content from a successful tool result.
+ * Format: `{"observation": <result>}`
+ */
+export function buildObservationContent(result: unknown): string {
+  return JSON.stringify({ observation: result });
+}
+
+/**
+ * Build an observation message content from a tool execution error.
+ * Format: `{"observation": "Error: <message>"}`
+ */
+export function buildErrorObservationContent(error: Error | string): string {
+  const message = error instanceof Error ? error.message : error;
+  return JSON.stringify({ observation: `Error: ${message}` });
 }
 
 @Injectable()
@@ -66,8 +145,11 @@ export class SessionService {
     private readonly messageRepository: Repository<MessageEntity>,
     @InjectRepository(AgentEntity)
     private readonly agentRepository: Repository<AgentEntity>,
+    @InjectRepository(AgentToolEntity)
+    private readonly agentToolRepository: Repository<AgentToolEntity>,
     private readonly dataSource: DataSource,
-    private readonly llmService: LlmService
+    private readonly llmService: LlmService,
+    private readonly mcpClientService: McpClientService
   ) {}
 
   /**
@@ -172,23 +254,10 @@ export class SessionService {
     }
 
     try {
-      const { savedThoughtMsg, savedAssistantMsg } = await this.runLlmTurn(
-        session,
-        agent,
-        dto.content,
-        userName,
-        createdBy
-      );
-
-      // SSE event: thought_created
-      res.write(`event: thought_created\n`);
-      res.write(`data: ${JSON.stringify(savedThoughtMsg)}\n\n`);
-
-      // SSE event: message_created
-      res.write(`event: message_created\n`);
-      res.write(`data: ${JSON.stringify(savedAssistantMsg)}\n\n`);
+      await this.runLlmTurn(session, agent, dto.content, userName, createdBy, res);
     } catch (err) {
-      // SSE event: error
+      // SSE event: error — runLlmTurn handles its own errors internally and
+      // pushes error events itself; this only catches unexpected throws.
       const errorMessage =
         err instanceof Error ? err.message : 'Unknown error occurred';
       this.logger.error(`createMessage SSE error: ${errorMessage}`);
@@ -201,29 +270,37 @@ export class SessionService {
   }
 
   /**
-   * Run one full assistant turn for a session: persist the user message, build
-   * the LLM context from history, call the LLM, then persist the Thought and
-   * the parsed assistant reply. Also bumps the session's last_activity_time.
+   * Run a full multi-turn assistant turn for a session: persist the user message,
+   * then loop until the LLM produces a `final_answer`, executing MCP tools each
+   * time the LLM emits an `action`. Streams every intermediate state (LLM thoughts
+   * and tool observations) via SSE to the response.
+   *
+   * Loop structure:
+   *   1. Build LLM context from session history (saved messages so far)
+   *   2. Call LLM, save raw output as Thought message, push `thought_created`
+   *   3. Parse output:
+   *        - `final_answer` → save assistant reply, push `message_created`, exit
+   *        - `action`        → execute MCP tool, save observation as Thought,
+   *                            push `thought_created`, increment counter, loop
+   *        - `error`         → push `error` event, exit
+   *   4. Hard-cap at MAX_TOOL_CALLS (20) to prevent runaway loops.
    *
    * The LLM call happens outside any DB transaction so the connection isn't
-   * held during the network round-trip. Returns the two saved assistant-side
-   * messages so the caller can stream them.
+   * held during the network round-trip.
    */
   private async runLlmTurn(
     session: SessionEntity,
     agent: AgentEntity,
     content: string,
     userName: string,
-    createdBy: string
-  ): Promise<{
-    savedUserMsg: MessageEntity;
-    savedThoughtMsg: MessageEntity;
-    savedAssistantMsg: MessageEntity;
-  }> {
+    createdBy: string,
+    res: Response
+  ): Promise<void> {
     const sessionId = session.id;
     const now = new Date();
+    let timestampOffset = 1;
 
-    // Save user message first
+    // Save user message first (one-time, before the loop starts)
     const userMessage = this.messageRepository.create({
       sessionId,
       userName,
@@ -233,9 +310,10 @@ export class SessionService {
       createdOn: now,
       createdBy,
     });
-    const savedUserMsg = await this.messageRepository.save(userMessage);
+    await this.messageRepository.save(userMessage);
 
-    // Query session history (last 200 messages DESC, then reverse to ASC)
+    // Build the initial LLM context from session history. The history already
+    // includes the user message we just saved.
     const history = await this.messageRepository.find({
       where: { sessionId },
       order: { createdOn: 'DESC', id: 'DESC' },
@@ -243,7 +321,6 @@ export class SessionService {
     });
     history.reverse();
 
-    // Build messages array for LLM
     const systemPrompt = agent.systemPrompt || 'You are a helpful assistant.';
     const llmMessages: {
       role: 'system' | 'user' | 'assistant';
@@ -258,45 +335,171 @@ export class SessionService {
       })),
     ];
 
-    // Call LLM
-    this.logger.log(
-      `Calling LLM for session ${sessionId} with ${llmMessages.length} messages`
-    );
-    const llmOutput = await this.llmService.callLlm(agent, llmMessages);
-    this.logger.log(`LLM output for session ${sessionId}: ${llmOutput}`);
+    let toolCallCount = 0;
 
-    // Save Thought message (is_thought=1)
-    const thoughtMessage = this.messageRepository.create({
-      sessionId,
-      userName: ASSISTANT_USER,
-      messageType: 1,
-      isThought: 1,
-      content: llmOutput,
-      createdOn: new Date(now.getTime() + 1),
-      createdBy: `assistant/${createdBy}`,
-    });
-    const savedThoughtMsg = await this.messageRepository.save(thoughtMessage);
+    // Tool calling loop: run until final_answer, error, or tool call limit.
+    while (true) {
+      // Step 1: call LLM
+      this.logger.log(
+        `Calling LLM for session ${sessionId} with ${llmMessages.length} messages (toolCallCount=${toolCallCount})`
+      );
+      const llmOutput = await this.llmService.callLlm(agent, llmMessages);
+      this.logger.log(`LLM output for session ${sessionId}: ${llmOutput}`);
 
-    // Save assistant reply (is_thought=0)
-    const assistantMessage = this.messageRepository.create({
-      sessionId,
-      userName: ASSISTANT_USER,
-      messageType: 1,
-      isThought: 0,
-      content: parseAssistantReply(llmOutput),
-      createdOn: new Date(now.getTime() + 2),
-      createdBy: `assistant/${createdBy}`,
-    });
-    const savedAssistantMsg =
-      await this.messageRepository.save(assistantMessage);
+      // Step 2: save the raw output as a Thought message and push it.
+      const thoughtMessage = this.messageRepository.create({
+        sessionId,
+        userName: ASSISTANT_USER,
+        messageType: 1,
+        isThought: 1,
+        content: llmOutput,
+        createdOn: new Date(now.getTime() + timestampOffset++),
+        createdBy: `assistant/${createdBy}`,
+      });
+      const savedThoughtMsg = await this.messageRepository.save(thoughtMessage);
+      res.write(`event: thought_created\n`);
+      res.write(`data: ${JSON.stringify(savedThoughtMsg)}\n\n`);
 
-    // Update session last_activity_time
+      // Step 3: parse and dispatch
+      const parsed = parseAssistantReply(llmOutput);
+
+      if (parsed.type === 'final_answer') {
+        // Save assistant reply, push `message_created`, exit loop.
+        const assistantMessage = this.messageRepository.create({
+          sessionId,
+          userName: ASSISTANT_USER,
+          messageType: 1,
+          isThought: 0,
+          content: parsed.content,
+          createdOn: new Date(now.getTime() + timestampOffset++),
+          createdBy: `assistant/${createdBy}`,
+        });
+        const savedAssistantMsg = await this.messageRepository.save(
+          assistantMessage
+        );
+        res.write(`event: message_created\n`);
+        res.write(`data: ${JSON.stringify(savedAssistantMsg)}\n\n`);
+        break;
+      }
+
+      if (parsed.type === 'error') {
+        // LLM output was malformed: save error as the assistant reply so the
+        // user sees what went wrong, push it, and exit.
+        const assistantMessage = this.messageRepository.create({
+          sessionId,
+          userName: ASSISTANT_USER,
+          messageType: 1,
+          isThought: 0,
+          content: parsed.content,
+          createdOn: new Date(now.getTime() + timestampOffset++),
+          createdBy: `assistant/${createdBy}`,
+        });
+        const savedAssistantMsg = await this.messageRepository.save(
+          assistantMessage
+        );
+        res.write(`event: message_created\n`);
+        res.write(`data: ${JSON.stringify(savedAssistantMsg)}\n\n`);
+        break;
+      }
+
+      // parsed.type === 'action': enforce the tool-call cap before executing.
+      if (toolCallCount >= MAX_TOOL_CALLS) {
+        this.logger.warn(
+          `Tool call limit (${MAX_TOOL_CALLS}) exceeded for session ${sessionId}`
+        );
+        res.write(`event: error\n`);
+        res.write(
+          `data: ${JSON.stringify({
+            message: `Tool call limit exceeded (max ${MAX_TOOL_CALLS} calls per message)`,
+          })}\n\n`
+        );
+        break;
+      }
+
+      // Append the LLM's action thought to the LLM-side history so the next
+      // turn sees what action the model just decided.
+      llmMessages.push({ role: 'assistant', content: llmOutput });
+
+      // Step 4: execute the MCP tool and produce an observation.
+      const observationContent = await this.executeTool(parsed.actionData);
+
+      // Persist the observation as a Thought message and push it.
+      const observationMessage = this.messageRepository.create({
+        sessionId,
+        userName: ASSISTANT_USER,
+        messageType: 1,
+        isThought: 1,
+        content: observationContent,
+        createdOn: new Date(now.getTime() + timestampOffset++),
+        createdBy: `assistant/${createdBy}`,
+      });
+      const savedObservationMsg = await this.messageRepository.save(
+        observationMessage
+      );
+      res.write(`event: thought_created\n`);
+      res.write(`data: ${JSON.stringify(savedObservationMsg)}\n\n`);
+
+      // Append the observation to the LLM history (as an assistant turn) and
+      // continue the loop.
+      llmMessages.push({ role: 'assistant', content: observationContent });
+      toolCallCount++;
+    }
+
+    // Update session last_activity_time once the turn completes.
     session.lastActivityTime = now;
     session.updatedOn = now;
     session.updatedBy = createdBy;
     await this.sessionRepository.save(session);
+  }
 
-    return { savedUserMsg, savedThoughtMsg, savedAssistantMsg };
+  /**
+   * Execute one MCP tool call and return the observation message content.
+   *
+   * Handles three failure modes by returning an error observation (so the LLM
+   * can react to them) instead of throwing:
+   *   - tool name doesn't match the `mcp__${id}__${toolName}` format
+   *   - the agent_tool row for the parsed id doesn't exist
+   *   - the MCP server call itself fails
+   */
+  private async executeTool(actionData: {
+    tool: string;
+    params: unknown;
+  }): Promise<string> {
+    // Parse the tool name into agent tool ID + tool name.
+    const parsed = parseToolName(actionData.tool);
+    if (!parsed) {
+      this.logger.warn(`Invalid tool name format: ${actionData.tool}`);
+      return buildErrorObservationContent(
+        `Invalid tool name format: "${actionData.tool}". Expected mcp__<id>__<name>.`
+      );
+    }
+
+    // Look up the MCP server URL from t_agent_tool.
+    const agentTool = await this.agentToolRepository.findOne({
+      where: { id: parsed.agentToolId },
+    });
+    if (!agentTool) {
+      this.logger.warn(`Agent tool not found: id=${parsed.agentToolId}`);
+      return buildErrorObservationContent(
+        `Agent tool with id ${parsed.agentToolId} not found.`
+      );
+    }
+
+    // Call the MCP tool.
+    try {
+      const result = await this.mcpClientService.callTool(
+        agentTool.serverUrl,
+        parsed.toolName,
+        actionData.params
+      );
+      return buildObservationContent(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `MCP tool execution failed: tool=${parsed.toolName} url=${agentTool.serverUrl}: ${message}`
+      );
+      return buildErrorObservationContent(message);
+    }
   }
 
   /**

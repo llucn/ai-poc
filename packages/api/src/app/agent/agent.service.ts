@@ -11,6 +11,7 @@ import { AgentEntity } from './agent.entity';
 import { AgentToolEntity, type McpToolSchema } from './agent-tool.entity';
 import { AgentSkillEntity } from './agent-skill.entity';
 import { validateMarkdownContent } from '../utils/sanitize-markdown';
+import { McpClientService } from '../mcp/mcp-client.service';
 import type {
   CreateAgentDto,
   UpdateAgentDto,
@@ -39,7 +40,8 @@ export class AgentService {
     private readonly agentToolRepository: Repository<AgentToolEntity>,
     @InjectRepository(AgentSkillEntity)
     private readonly agentSkillRepository: Repository<AgentSkillEntity>,
-    private readonly dataSource: DataSource
+    private readonly dataSource: DataSource,
+    private readonly mcpClientService: McpClientService
   ) {}
 
   /** Strip the model authToken from an agent, exposing only hasApiKey. */
@@ -246,9 +248,7 @@ export class AgentService {
   /**
    * Fetch and parse the tool list from an MCP server URL.
    *
-   * Speaks the MCP Streamable-HTTP transport: POST JSON-RPC requests,
-   * performing the initialize handshake then calling tools/list. Servers
-   * may answer with application/json or text/event-stream; both are handled.
+   * Delegates to McpClientService for MCP communication.
    * Throws BadRequestException on failure.
    */
   async fetchMcpSchema(serverUrl: string): Promise<McpToolSchema[]> {
@@ -261,142 +261,12 @@ export class AgentService {
 
     const url = parsedUrl.toString();
     try {
-      // 1. initialize — also captures an optional session id header.
-      const init = await this.mcpRpc(url, null, {
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2025-03-26',
-          capabilities: {},
-          clientInfo: { name: 'ai-poc', version: '1.0.0' },
-        },
-      });
-      const sessionId = init.sessionId;
-
-      // 2. notifications/initialized — best-effort, ignore failures.
-      try {
-        await this.mcpRpc(url, sessionId, {
-          jsonrpc: '2.0',
-          method: 'notifications/initialized',
-        });
-      } catch {
-        /* some servers don't require this; continue */
-      }
-
-      // 3. tools/list
-      const listed = await this.mcpRpc(url, sessionId, {
-        jsonrpc: '2.0',
-        id: 2,
-        method: 'tools/list',
-        params: {},
-      });
-
-      if (listed.body?.error) {
-        throw new Error(
-          listed.body.error?.message ?? 'tools/list returned an error'
-        );
-      }
-
-      return this.normalizeMcpSchema(listed.body);
+      return await this.mcpClientService.fetchTools(url);
     } catch (error: any) {
       throw new BadRequestException(
         `Failed to fetch MCP schema: ${error?.message ?? 'unknown error'}`
       );
     }
-  }
-
-  /**
-   * Send a single JSON-RPC message to an MCP Streamable-HTTP endpoint and
-   * return the parsed body plus any session id. Handles both JSON and SSE
-   * responses. A notification (no id) resolves with an empty body.
-   */
-  private async mcpRpc(
-    url: string,
-    sessionId: string | null,
-    payload: Record<string, unknown>
-  ): Promise<{ body: any; sessionId: string | null }> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/event-stream',
-    };
-    if (sessionId) {
-      headers['Mcp-Session-Id'] = sessionId;
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(8000),
-    });
-
-    const nextSessionId =
-      response.headers.get('Mcp-Session-Id') ?? sessionId;
-
-    // Notifications return 202 Accepted with no body.
-    if (response.status === 202 || payload['id'] === undefined) {
-      return { body: null, sessionId: nextSessionId };
-    }
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(
-        `HTTP ${response.status} ${response.statusText}${text ? `: ${text.slice(0, 200)}` : ''}`
-      );
-    }
-
-    const contentType = response.headers.get('content-type') ?? '';
-    const raw = await response.text();
-    const body = contentType.includes('text/event-stream')
-      ? this.parseSseJsonRpc(raw)
-      : raw
-        ? JSON.parse(raw)
-        : null;
-
-    return { body, sessionId: nextSessionId };
-  }
-
-  /**
-   * Extract the last JSON-RPC message from an SSE stream body. Each event's
-   * `data:` lines carry the JSON payload.
-   */
-  private parseSseJsonRpc(raw: string): any {
-    let result: any = null;
-    for (const block of raw.split(/\n\n+/)) {
-      const dataLines = block
-        .split('\n')
-        .filter((line) => line.startsWith('data:'))
-        .map((line) => line.slice(5).trim());
-      if (dataLines.length === 0) continue;
-      try {
-        result = JSON.parse(dataLines.join('\n'));
-      } catch {
-        /* skip non-JSON keep-alive events */
-      }
-    }
-    return result;
-  }
-
-  /** Normalize various MCP listing shapes into a McpToolSchema[]. */
-  private normalizeMcpSchema(data: any): McpToolSchema[] {
-    // Accept { result: { tools: [...] } }, { tools: [...] }, or a bare array.
-    const rawTools =
-      data?.result?.tools ??
-      data?.tools ??
-      (Array.isArray(data) ? data : null);
-
-    if (!Array.isArray(rawTools)) {
-      throw new BadRequestException(
-        'MCP server response did not contain a tool list'
-      );
-    }
-
-    return rawTools.map((t: any) => ({
-      name: String(t?.name ?? ''),
-      description: t?.description ?? null,
-      parameters: t?.inputSchema ?? t?.parameters ?? t?.schema ?? null,
-    }));
   }
 
   /** Test an MCP server URL without persisting; returns the parsed tools. */

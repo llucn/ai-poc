@@ -237,7 +237,7 @@ export function ChatPage() {
           </div>
         )}
 
-        {messages.map((msg) => {
+        {messages.map((msg, index) => {
           // "Thinking..." placeholder
           if (msg.id === THINKING_ID) {
             return (
@@ -249,7 +249,16 @@ export function ChatPage() {
           }
           // Thought messages render as a collapsible note
           if (msg.isThought === 1) {
-            return <ThoughtMessage key={msg.id} content={msg.content} />;
+            // A thought should only be expanded if there are NO messages after it
+            // (i.e., it's the last message in the list, regardless of type)
+            const isLastMessage = index === messages.length - 1;
+            return (
+              <ThoughtMessage
+                key={msg.id}
+                content={msg.content}
+                defaultExpanded={isLastMessage}
+              />
+            );
           }
           const isAssistant = msg.userName === 'ASSISTANT';
           return (

@@ -1,19 +1,27 @@
 import { faLightbulb } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 type Props = {
   content: string | null;
+  /** Whether this thought should be expanded. Controlled externally. */
+  defaultExpanded?: boolean;
 };
 
 /**
- * Collapsible "Thought" entry in the chat timeline. Default collapsed,
- * shows only a lightbulb + "Thought" header. Clicking the header toggles
- * the expanded body, which renders content as plain text (no Markdown).
+ * Collapsible "Thought" entry in the chat timeline.
+ *
+ * Starts expanded by default (when new), then auto-collapses when a subsequent
+ * message arrives. User can manually toggle expansion at any time.
  */
-export function ThoughtMessage({ content }: Props) {
-  const [expanded, setExpanded] = useState(false);
+export function ThoughtMessage({ content, defaultExpanded = false }: Props) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const toggle = () => setExpanded((prev) => !prev);
+
+  // Sync with external expansion state when it changes
+  useEffect(() => {
+    setExpanded(defaultExpanded);
+  }, [defaultExpanded]);
 
   return (
     <div className="chat-thought">

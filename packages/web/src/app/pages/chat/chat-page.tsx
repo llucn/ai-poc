@@ -7,7 +7,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useApiFetch } from '../../auth/use-api-fetch';
 import { useUser } from '../../contexts/UserContext';
 import { ThoughtMessage } from './thought-message';
-import type { CreateSessionResponse, Message } from './types';
+import type { Message, Session } from './types';
 
 const THINKING_ID = -1;
 // Temp id for the user's own bubble shown immediately on send. The real
@@ -30,9 +30,22 @@ export function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Set right before navigating to /chat/{id} for a session we just created
+  // in-memory. It tells the load effect to skip the clear+refetch for that one
+  // navigation, so the messages already on screen (the optimistic user bubble
+  // and the SSE-streamed reply) stay put — no blank/Loading flicker.
+  const skipReloadRef = useRef(false);
 
   // Load messages for existing session
   useEffect(() => {
+    // We just created this session in-memory and navigated here; the messages
+    // are already on screen. Skip the clear+refetch once to avoid a flicker.
+    if (skipReloadRef.current) {
+      skipReloadRef.current = false;
+      setLoading(false);
+      return;
+    }
+
     setMessages([]);
     setError(null);
 
@@ -71,6 +84,84 @@ export function ChatPage() {
     setMessages((prev) => prev.filter((m) => m.id !== THINKING_ID));
   };
 
+  // Append the user's bubble + a "Thinking..." placeholder, then open the SSE
+  // stream for one assistant turn. Used identically for the first message of a
+  // new session and for every subsequent message.
+  const streamMessage = useCallback(
+    async (sid: number, content: string) => {
+      const pendingUserMsg: Message = {
+        id: PENDING_USER_ID,
+        sessionId: sid,
+        userName: user?.username || '',
+        messageType: 1,
+        isThought: 0,
+        content,
+        createdOn: '',
+        createdBy: '',
+      };
+      const thinkingMsg: Message = {
+        id: THINKING_ID,
+        sessionId: sid,
+        userName: 'ASSISTANT',
+        messageType: 1,
+        isThought: 0,
+        content: null,
+        createdOn: '',
+        createdBy: '',
+      };
+      setMessages((prev) => [...prev, pendingUserMsg, thinkingMsg]);
+
+      const url = `/api/sessions/${sid}/messages`;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (user) {
+        headers['X-User-Name'] = user.username;
+        if (user.role) {
+          headers['X-User-Role'] = user.role;
+        }
+      }
+
+      await fetchEventSource(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ content }),
+        onmessage(ev) {
+          if (ev.event === 'thought_created' || ev.event === 'message_created') {
+            try {
+              const msg: Message = JSON.parse(ev.data);
+              setMessages((prev) =>
+                prev.filter((m) => m.id !== THINKING_ID).concat(msg)
+              );
+            } catch {
+              // ignore parse errors
+            }
+          } else if (ev.event === 'error') {
+            try {
+              const errData = JSON.parse(ev.data);
+              setError(errData.message || 'LLM call failed');
+            } catch {
+              setError('LLM call failed');
+            }
+            removeThinker();
+          }
+        },
+        onerror(err) {
+          setError(err instanceof Error ? err.message : 'Connection failed');
+          removeThinker();
+          throw err; // stop retries
+        },
+        onclose() {
+          removeThinker();
+        },
+      });
+
+      // fetchEventSource resolves when the stream ends
+      removeThinker();
+    },
+    [user]
+  );
+
   const handleSend = useCallback(async () => {
     const content = input.trim();
     if (!content || sending) return;
@@ -80,131 +171,34 @@ export function ChatPage() {
     setError(null);
 
     try {
-      if (sessionId === null) {
-        // First message: create session (normal POST, not SSE).
-        // Show user bubble + Thinking immediately while waiting for LLM.
-        const pendingUserMsg: Message = {
-          id: PENDING_USER_ID,
-          sessionId: 0,
-          userName: user?.username || '',
-          messageType: 1,
-          isThought: 0,
-          content,
-          createdOn: '',
-          createdBy: '',
-        };
-        const thinkingMsg: Message = {
-          id: THINKING_ID,
-          sessionId: 0,
-          userName: 'ASSISTANT',
-          messageType: 1,
-          isThought: 0,
-          content: null,
-          createdOn: '',
-          createdBy: '',
-        };
-        setMessages([pendingUserMsg, thinkingMsg]);
-
+      let sid = sessionId;
+      if (sid === null) {
+        // First message: create the empty session (plain POST), then stream
+        // the message through the exact same SSE path as every other message.
         const res = await apiFetch('/sessions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ content }),
         });
-        const data: CreateSessionResponse = await res.json();
-        // Replace temp messages with real ones from server
-        setMessages(data.messages);
-        navigate(`/chat/${data.session.id}`, { replace: true });
-        setSending(false);
-        // Refocus textarea for next message
-        inputRef.current?.focus();
-      } else {
-        // Subsequent messages: use SSE.
-        // Append the user's bubble immediately so they see their own message,
-        // then a "Thinking..." placeholder while waiting for the LLM.
-        const pendingUserMsg: Message = {
-          id: PENDING_USER_ID,
-          sessionId,
-          userName: user?.username || '',
-          messageType: 1,
-          isThought: 0,
-          content,
-          createdOn: '',
-          createdBy: '',
-        };
-        const thinkingMsg: Message = {
-          id: THINKING_ID,
-          sessionId,
-          userName: 'ASSISTANT',
-          messageType: 1,
-          isThought: 0,
-          content: null,
-          createdOn: '',
-          createdBy: '',
-        };
-        setMessages((prev) => [...prev, pendingUserMsg, thinkingMsg]);
-
-        const url = `/api/sessions/${sessionId}/messages`;
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-        };
-        if (user) {
-          headers['X-User-Name'] = user.username;
-          if (user.role) {
-            headers['X-User-Role'] = user.role;
-          }
-        }
-
-        await fetchEventSource(url, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ content }),
-          onmessage(ev) {
-            if (ev.event === 'thought_created' || ev.event === 'message_created') {
-              try {
-                const msg: Message = JSON.parse(ev.data);
-                setMessages((prev) =>
-                  prev.filter((m) => m.id !== THINKING_ID).concat(msg)
-                );
-              } catch {
-                // ignore parse errors
-              }
-            } else if (ev.event === 'error') {
-              try {
-                const errData = JSON.parse(ev.data);
-                setError(errData.message || 'LLM call failed');
-              } catch {
-                setError('LLM call failed');
-              }
-              removeThinker();
-            }
-          },
-          onerror(err) {
-            setError(
-              err instanceof Error ? err.message : 'Connection failed'
-            );
-            removeThinker();
-            setSending(false);
-            throw err; // stop retries
-          },
-          onclose() {
-            removeThinker();
-            setSending(false);
-            // Refocus textarea for next message
-            inputRef.current?.focus();
-          },
-        });
-
-        // fetchEventSource resolves when stream ends
-        removeThinker();
-        setSending(false);
+        const session: Session = await res.json();
+        sid = session.id;
+        // Skip the load effect's clear+refetch for this navigation so the
+        // about-to-be-streamed messages aren't wiped (no flicker).
+        skipReloadRef.current = true;
+        navigate(`/chat/${sid}`, { replace: true });
       }
+
+      await streamMessage(sid, content);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send message');
       setInput(content);
       removeThinker();
+    } finally {
       setSending(false);
+      // Refocus textarea for next message
+      inputRef.current?.focus();
     }
-  }, [input, sending, sessionId, apiFetch, navigate, user]);
+  }, [input, sending, sessionId, apiFetch, navigate, streamMessage]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -243,7 +237,7 @@ export function ChatPage() {
           </div>
         )}
 
-        {messages.map((msg) => {
+        {messages.map((msg, index) => {
           // "Thinking..." placeholder
           if (msg.id === THINKING_ID) {
             return (
@@ -255,7 +249,16 @@ export function ChatPage() {
           }
           // Thought messages render as a collapsible note
           if (msg.isThought === 1) {
-            return <ThoughtMessage key={msg.id} content={msg.content} />;
+            // A thought should only be expanded if there are NO messages after it
+            // (i.e., it's the last message in the list, regardless of type)
+            const isLastMessage = index === messages.length - 1;
+            return (
+              <ThoughtMessage
+                key={msg.id}
+                content={msg.content}
+                defaultExpanded={isLastMessage}
+              />
+            );
           }
           const isAssistant = msg.userName === 'ASSISTANT';
           return (
@@ -278,7 +281,7 @@ export function ChatPage() {
               >
                 <MarkdownPreview
                   source={msg.content || ''}
-                  style={{ background: 'transparent', padding: 0 }}
+                  style={{ background: 'transparent', padding: 0, fontSize: '13px' }}
                 />
               </div>
             </div>

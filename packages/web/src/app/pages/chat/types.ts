@@ -30,8 +30,3 @@ export interface CreateSessionDto {
 export interface CreateMessageDto {
   content: string;
 }
-
-export interface CreateSessionResponse {
-  session: Session;
-  messages: Message[];
-}

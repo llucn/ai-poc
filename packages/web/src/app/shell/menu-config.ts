@@ -28,6 +28,20 @@ export const DEMO_MENU: MenuItem[] = [
     ],
   },
   {
+    id: 'knowledge',
+    label: 'Knowledge',
+    children: [
+      { id: 'knowledge-overview', label: 'Overview', to: '/dashboard/overview' },
+    ],
+  },
+  {
+    id: 'memory',
+    label: 'Memory',
+    children: [
+      { id: 'memory-overview', label: 'Overview', to: '/dashboard/overview' },
+    ],
+  },
+  {
     id: 'settings',
     label: 'Settings',
     children: [

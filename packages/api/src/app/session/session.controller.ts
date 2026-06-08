@@ -48,11 +48,7 @@ export class SessionController {
   async create(@Body() dto: CreateSessionDto, @CurrentUser() user: any) {
     const userName = user?.userName || user?.username || '';
     const createdBy = userName || 'system';
-    return this.sessionService.createSessionWithFirstMessage(
-      dto,
-      userName,
-      createdBy
-    );
+    return this.sessionService.createSession(dto, userName, createdBy);
   }
 
   @Delete()

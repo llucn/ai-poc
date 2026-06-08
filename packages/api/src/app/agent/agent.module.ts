@@ -5,10 +5,12 @@ import { AgentToolEntity } from './agent-tool.entity';
 import { AgentSkillEntity } from './agent-skill.entity';
 import { AgentService } from './agent.service';
 import { AgentController } from './agent.controller';
+import { McpModule } from '../mcp/mcp.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([AgentEntity, AgentToolEntity, AgentSkillEntity]),
+    McpModule,
   ],
   providers: [AgentService],
   controllers: [AgentController],

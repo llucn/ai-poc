@@ -300,7 +300,44 @@ export class SessionService {
     const now = new Date();
     let timestampOffset = 1;
 
-    // Save user message first (one-time, before the loop starts)
+    // Send an initial SSE comment immediately to establish the connection and
+    // prevent browser timeout during the first LLM call.
+    res.write(': connection established\n\n');
+
+    // Check for duplicate user message (idempotency protection).
+    // If a recent message (within 10 seconds) with identical content exists,
+    // this is likely a retry from the client after a perceived timeout.
+    const recentWindow = new Date(now.getTime() - 10000);
+    const recentDuplicate = await this.messageRepository.findOne({
+      where: {
+        sessionId,
+        userName,
+        messageType: 1,
+        isThought: 0,
+        content,
+      },
+      order: { createdOn: 'DESC' },
+    });
+
+    if (
+      recentDuplicate &&
+      new Date(recentDuplicate.createdOn).getTime() > recentWindow.getTime()
+    ) {
+      // Duplicate detected: do not save the user message again, do not call LLM.
+      // Just send an error event and close.
+      this.logger.warn(
+        `Duplicate user message detected for session ${sessionId} (content: "${content.substring(0, 50)}...")`
+      );
+      res.write(`event: error\n`);
+      res.write(
+        `data: ${JSON.stringify({
+          message: 'Duplicate message detected (request already in progress)',
+        })}\n\n`
+      );
+      return;
+    }
+
+    // Save user message (one-time, before the loop starts)
     const userMessage = this.messageRepository.create({
       sessionId,
       userName,
@@ -339,6 +376,9 @@ export class SessionService {
 
     // Tool calling loop: run until final_answer, error, or tool call limit.
     while (true) {
+      // Send a keep-alive comment before each LLM call to prevent connection timeout.
+      res.write(': processing\n\n');
+
       // Step 1: call LLM
       this.logger.log(
         `Calling LLM for session ${sessionId} with ${llmMessages.length} messages (toolCallCount=${toolCallCount})`

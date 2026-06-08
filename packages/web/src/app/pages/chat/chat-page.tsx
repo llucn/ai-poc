@@ -278,7 +278,7 @@ export function ChatPage() {
               >
                 <MarkdownPreview
                   source={msg.content || ''}
-                  style={{ background: 'transparent', padding: 0 }}
+                  style={{ background: 'transparent', padding: 0, fontSize: '13px' }}
                 />
               </div>
             </div>

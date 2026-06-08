@@ -1328,8 +1328,8 @@ textarea.ic-input {
 }
 
 .chat-bubble-user {
-  background: #3b82f6;
-  color: white;
+  background: #d3e3fd;
+  color: #24292f;
 }
 
 .chat-bubble-assistant {

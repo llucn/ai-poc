@@ -160,7 +160,7 @@ export function EditSkillPage() {
           />
         </div>
 
-        <div className="ic-field" data-color-mode="light">
+        <div className="ic-field">
           <label className="ic-field-label">Content</label>
           <MDEditor
             value={content}

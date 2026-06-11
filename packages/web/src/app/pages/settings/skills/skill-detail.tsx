@@ -121,7 +121,7 @@ export function SkillDetailPage() {
           <h2 className="ic-section-title">Content</h2>
         </div>
         {skill.content ? (
-          <div className="ic-markdown-content" data-color-mode="light">
+          <div className="ic-markdown-content">
             <MarkdownPreview source={skill.content} />
           </div>
         ) : (

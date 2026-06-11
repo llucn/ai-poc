@@ -277,7 +277,6 @@ export function ChatPage() {
               </div>
               <div
                 className={`chat-bubble ${isAssistant ? 'chat-bubble-assistant' : 'chat-bubble-user'}`}
-                data-color-mode="light"
               >
                 <MarkdownPreview
                   source={msg.content || ''}

@@ -29,6 +29,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    // Mirror to data-color-mode so @uiw/react-md-editor and
+    // @uiw/react-markdown-preview pick up the matching theme. Both libraries
+    // read this attribute from the nearest ancestor; setting it on <html>
+    // covers every Markdown surface in the app.
+    document.documentElement.setAttribute('data-color-mode', theme);
   }, [theme]);
 
   const setTheme = useCallback((next: Theme) => {

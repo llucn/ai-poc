@@ -64,6 +64,9 @@
   --transition-fast: 0.13s ease;
   --transition: 0.2s ease;
   --transition-slow: 0.35s ease;
+  /* Chat bubble: user side is a step darker than the assistant card. */
+  --chat-bubble-user-bg: #0a1322;
+  --chat-bubble-user-text: var(--text);
   color-scheme: dark;
 }
 
@@ -122,6 +125,9 @@
   --transition-fast: 0.13s ease;
   --transition: 0.2s ease;
   --transition-slow: 0.35s ease;
+  /* Chat bubble: user side is a step darker than the assistant card (white). */
+  --chat-bubble-user-bg: #dbe3ee;
+  --chat-bubble-user-text: var(--text);
   color-scheme: light;
 }
 
@@ -165,6 +171,8 @@
   --font-mono: "DM Mono", ui-monospace, "Cascadia Code", "Fira Code", monospace;
   --font-display: "Syne", "DM Sans", system-ui, sans-serif;
   --radius: 10px;
+  --chat-bubble-user-bg: #0a1322;
+  --chat-bubble-user-text: #e2e8f0;
   color-scheme: dark;
 }
 
@@ -1406,8 +1414,9 @@ textarea.ic-input {
 }
 
 .chat-bubble-user {
-  background: #d3e3fd;
-  color: #24292f;
+  background: var(--chat-bubble-user-bg);
+  color: var(--chat-bubble-user-text);
+  border: 1px solid var(--border);
 }
 
 .chat-bubble-assistant {

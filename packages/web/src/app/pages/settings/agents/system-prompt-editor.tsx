@@ -34,7 +34,7 @@ export function SystemPromptEditor({
         <h2 id="ic-sysprompt-title" className="ic-modal-title">
           Edit System Prompt
         </h2>
-        <div className="ic-modal-body" data-color-mode="light">
+        <div className="ic-modal-body">
           <MDEditor
             value={value}
             onChange={(v) => setValue(v ?? '')}

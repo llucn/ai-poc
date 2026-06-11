@@ -255,7 +255,7 @@ export function AgentDetailPage() {
           </button>
         </div>
         {agent.systemPrompt ? (
-          <div className="ic-markdown-content" data-color-mode="light">
+          <div className="ic-markdown-content">
             <MarkdownPreview source={agent.systemPrompt} />
           </div>
         ) : (

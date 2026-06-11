@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { faCircleCheck } from '@fortawesome/free-solid-svg-icons';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApiFetch } from '../../../auth/use-api-fetch';
 import { ConfirmDeleteDialog } from '../../../components/confirm-delete-dialog';
@@ -126,7 +128,15 @@ export function AllAgentsPage() {
         </td>
         <td>{agent.description || '—'}</td>
         <td>{agent.modelConfig?.modelName || '—'}</td>
-        <td>{agent.isDefault ? 'Yes' : 'No'}</td>
+        <td className="ic-col-icon">
+          {agent.isDefault ? (
+            <FontAwesomeIcon
+              icon={faCircleCheck}
+              className="ic-icon-yes"
+              title="Default agent"
+            />
+          ) : null}
+        </td>
       </tr>
     ));
   }, [agents, selected, loading, error, toggleRow]);
@@ -177,7 +187,7 @@ export function AllAgentsPage() {
               <th>Name</th>
               <th>Description</th>
               <th>Model</th>
-              <th>Default</th>
+              <th className="ic-col-icon">Default</th>
             </tr>
           </thead>
           <tbody>{tableBody}</tbody>

@@ -64,6 +64,9 @@
   --transition-fast: 0.13s ease;
   --transition: 0.2s ease;
   --transition-slow: 0.35s ease;
+  /* Chat bubble: user side is a step darker than the assistant card. */
+  --chat-bubble-user-bg: #0a1322;
+  --chat-bubble-user-text: var(--text);
   color-scheme: dark;
 }
 
@@ -122,6 +125,9 @@
   --transition-fast: 0.13s ease;
   --transition: 0.2s ease;
   --transition-slow: 0.35s ease;
+  /* Chat bubble: user side is a step darker than the assistant card (white). */
+  --chat-bubble-user-bg: #dbe3ee;
+  --chat-bubble-user-text: var(--text);
   color-scheme: light;
 }
 
@@ -165,6 +171,8 @@
   --font-mono: "DM Mono", ui-monospace, "Cascadia Code", "Fira Code", monospace;
   --font-display: "Syne", "DM Sans", system-ui, sans-serif;
   --radius: 10px;
+  --chat-bubble-user-bg: #0a1322;
+  --chat-bubble-user-text: #e2e8f0;
   color-scheme: dark;
 }
 
@@ -267,6 +275,84 @@ button {
 
 .topbar-spacer {
   flex: 1;
+}
+
+/* Wide-viewport primary menu in the topbar */
+.topbar-menu {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+}
+
+.topbar-menu-group {
+  position: relative;
+}
+
+.topbar-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--muted2);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.topbar-menu-button:hover {
+  color: var(--text);
+  background: var(--hover-subtle);
+}
+
+.topbar-menu-button.open {
+  color: var(--text);
+  background: var(--hover-subtle);
+}
+
+.topbar-menu-chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.topbar-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 180px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.topbar-menu-item:hover {
+  background: var(--hover-subtle);
+  color: var(--accent);
 }
 
 .topbar-actions {
@@ -1328,8 +1414,9 @@ textarea.ic-input {
 }
 
 .chat-bubble-user {
-  background: #d3e3fd;
-  color: #24292f;
+  background: var(--chat-bubble-user-bg);
+  color: var(--chat-bubble-user-text);
+  border: 1px solid var(--border);
 }
 
 .chat-bubble-assistant {

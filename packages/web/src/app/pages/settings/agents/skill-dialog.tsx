@@ -1,47 +1,85 @@
-import { useState } from 'react';
-import MDEditor from '@uiw/react-md-editor';
+import { useEffect, useState } from 'react';
 import { useApiFetch } from '../../../auth/use-api-fetch';
 import type { AgentSkill } from './types';
 
 type Props = {
   agentId: number;
-  // When provided, the dialog edits this skill; otherwise it adds a new one.
-  skill?: AgentSkill | null;
+  // IDs of skills already associated with this agent (pre-checked, disabled).
+  linkedSkillIds: number[];
   onSaved: () => void;
   onCancel: () => void;
 };
 
-// Modal to add or edit a Skill. Content uses a WYSIWYG Markdown editor.
-export function SkillDialog({ agentId, skill, onSaved, onCancel }: Props) {
+// Modal to associate existing global Skills with an agent. Shows the full
+// Skills list with checkboxes; confirming links the newly-checked skills.
+// Already linked skills are pre-checked and disabled (unlink from the detail
+// table).
+export function SkillDialog({
+  agentId,
+  linkedSkillIds,
+  onSaved,
+  onCancel,
+}: Props) {
   const apiFetch = useApiFetch();
-  const isEdit = !!skill;
+  const linkedSet = new Set(linkedSkillIds);
 
-  const [name, setName] = useState(skill?.name ?? '');
-  const [description, setDescription] = useState(skill?.description ?? '');
-  const [content, setContent] = useState(skill?.content ?? '');
+  const [skills, setSkills] = useState<AgentSkill[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [checked, setChecked] = useState<ReadonlySet<number>>(
+    () => new Set<number>()
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const nameTrimmed = name.trim();
-  const saveDisabled = !nameTrimmed || saving;
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiFetch('/skills?page=1&pageSize=200')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) {
+          setSkills(data.data || []);
+          setLoadError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setLoadError(
+            err instanceof Error ? err.message : 'Failed to load skills'
+          );
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFetch]);
+
+  const toggle = (id: number) => {
+    if (linkedSet.has(id)) return;
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const onSave = async () => {
-    if (saveDisabled) return;
+    const toLink = Array.from(checked);
+    if (toLink.length === 0 || saving) return;
     setSaving(true);
     setError(null);
     try {
-      const path = isEdit
-        ? `/agents/${agentId}/skills/${skill!.id}`
-        : `/agents/${agentId}/skills`;
-      await apiFetch(path, {
-        method: isEdit ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: nameTrimmed,
-          description: description.trim() || null,
-          content: content.trim() || null,
-        }),
-      });
+      for (const skillId of toLink) {
+        await apiFetch(`/agents/${agentId}/skills`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ skillId }),
+        });
+      }
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
@@ -49,6 +87,8 @@ export function SkillDialog({ agentId, skill, onSaved, onCancel }: Props) {
       setSaving(false);
     }
   };
+
+  const saveDisabled = checked.size === 0 || saving;
 
   return (
     <div
@@ -65,48 +105,59 @@ export function SkillDialog({ agentId, skill, onSaved, onCancel }: Props) {
         aria-labelledby="ic-skill-title"
       >
         <h2 id="ic-skill-title" className="ic-modal-title">
-          {isEdit ? 'Edit Skill' : 'Add Skill'}
+          Add Skills
         </h2>
         <div className="ic-modal-body">
-          <div className="ic-field">
-            <label className="ic-field-label" htmlFor="skill-name">
-              Name *
-            </label>
-            <input
-              id="skill-name"
-              type="text"
-              className="ic-input"
-              value={name}
-              maxLength={255}
-              onChange={(e) => setName(e.target.value)}
-              disabled={saving}
-              autoComplete="off"
-            />
-          </div>
-
-          <div className="ic-field">
-            <label className="ic-field-label" htmlFor="skill-desc">
-              Description
-            </label>
-            <textarea
-              id="skill-desc"
-              className="ic-textarea"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              disabled={saving}
-              rows={2}
-            />
-          </div>
-
-          <div className="ic-field" data-color-mode="light">
-            <label className="ic-field-label">Content</label>
-            <MDEditor
-              value={content}
-              onChange={(v) => setContent(v ?? '')}
-              height={300}
-              textareaProps={{ disabled: saving }}
-            />
-          </div>
+          {loading ? (
+            <p className="ic-field-hint">Loading…</p>
+          ) : loadError ? (
+            <p className="ic-error-block" role="alert">
+              {loadError}
+            </p>
+          ) : skills.length === 0 ? (
+            <p className="ic-field-hint">
+              No skills available. Create one under the Skills menu first.
+            </p>
+          ) : (
+            <div className="ic-table-wrap">
+              <table className="ic-table">
+                <thead>
+                  <tr>
+                    <th className="ic-col-check"></th>
+                    <th className="ic-col-id">ID</th>
+                    <th>Name</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {skills.map((skill) => {
+                    const isLinked = linkedSet.has(skill.id);
+                    return (
+                      <tr key={skill.id}>
+                        <td className="ic-col-check">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${skill.name}`}
+                            checked={isLinked || checked.has(skill.id)}
+                            disabled={isLinked || saving}
+                            onChange={() => toggle(skill.id)}
+                          />
+                        </td>
+                        <td className="ic-col-id">#{skill.id}</td>
+                        <td>
+                          {skill.name}
+                          {isLinked && (
+                            <span className="ic-field-hint"> (linked)</span>
+                          )}
+                        </td>
+                        <td>{skill.description || '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {error && (
             <p className="ic-error-block" role="alert">
@@ -129,7 +180,7 @@ export function SkillDialog({ agentId, skill, onSaved, onCancel }: Props) {
             onClick={onSave}
             disabled={saveDisabled}
           >
-            {saving ? 'Saving…' : 'Save'}
+            {saving ? 'Saving…' : 'Confirm'}
           </button>
         </div>
       </div>

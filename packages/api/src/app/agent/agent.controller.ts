@@ -18,10 +18,8 @@ import type {
   UpdateAgentDto,
   DeleteAgentsDto,
   UpdateSystemPromptDto,
-  RegisterMcpServerDto,
-  TestMcpServerDto,
-  CreateSkillDto,
-  UpdateSkillDto,
+  LinkToolDto,
+  LinkSkillDto,
 } from './agent.dto';
 
 @Controller('agents')
@@ -77,83 +75,47 @@ export class AgentController {
     return { deleted };
   }
 
-  // ===== MCP Servers =====
+  // ===== Tool associations =====
 
-  @Get(':id/mcp-servers')
-  async listMcpServers(@Param('id', ParseIntPipe) id: number) {
-    return this.agentService.listMcpServers(id);
-  }
-
-  @Post(':id/mcp-servers/test')
-  @HttpCode(200)
-  async testMcpServer(
+  @Post(':id/tools')
+  async linkTool(
     @Param('id', ParseIntPipe) id: number,
-    @Body() dto: TestMcpServerDto
-  ) {
-    return this.agentService.testMcpServer(dto.serverUrl);
-  }
-
-  @Post(':id/mcp-servers')
-  async registerMcpServer(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: RegisterMcpServerDto,
+    @Body() dto: LinkToolDto,
     @CurrentUser() user: any
   ) {
     const createdBy = user?.username || 'system';
-    return this.agentService.registerMcpServer(id, dto, createdBy);
+    return this.agentService.linkTool(id, dto.toolId, createdBy);
   }
 
-  @Put(':id/mcp-servers/:serverId')
-  async updateMcpServer(
-    @Param('id', ParseIntPipe) id: number,
-    @Param('serverId', ParseIntPipe) serverId: number,
-    @Body() dto: RegisterMcpServerDto,
-    @CurrentUser() user: any
-  ) {
-    const updatedBy = user?.username || 'system';
-    return this.agentService.updateMcpServer(id, serverId, dto, updatedBy);
-  }
-
-  @Delete(':id/mcp-servers/:serverId')
+  @Delete(':id/tools/:toolId')
   @HttpCode(200)
-  async deleteMcpServer(
+  async unlinkTool(
     @Param('id', ParseIntPipe) id: number,
-    @Param('serverId', ParseIntPipe) serverId: number
+    @Param('toolId', ParseIntPipe) toolId: number
   ) {
-    await this.agentService.deleteMcpServer(id, serverId);
-    return { deleted: true };
+    await this.agentService.unlinkTool(id, toolId);
+    return { unlinked: true };
   }
 
-  // ===== Skills =====
+  // ===== Skill associations =====
 
   @Post(':id/skills')
-  async createSkill(
+  async linkSkill(
     @Param('id', ParseIntPipe) id: number,
-    @Body() dto: CreateSkillDto,
+    @Body() dto: LinkSkillDto,
     @CurrentUser() user: any
   ) {
     const createdBy = user?.username || 'system';
-    return this.agentService.createSkill(id, dto, createdBy);
-  }
-
-  @Put(':id/skills/:skillId')
-  async updateSkill(
-    @Param('id', ParseIntPipe) id: number,
-    @Param('skillId', ParseIntPipe) skillId: number,
-    @Body() dto: UpdateSkillDto,
-    @CurrentUser() user: any
-  ) {
-    const updatedBy = user?.username || 'system';
-    return this.agentService.updateSkill(id, skillId, dto, updatedBy);
+    return this.agentService.linkSkill(id, dto.skillId, createdBy);
   }
 
   @Delete(':id/skills/:skillId')
   @HttpCode(200)
-  async deleteSkill(
+  async unlinkSkill(
     @Param('id', ParseIntPipe) id: number,
     @Param('skillId', ParseIntPipe) skillId: number
   ) {
-    await this.agentService.deleteSkill(id, skillId);
-    return { deleted: true };
+    await this.agentService.unlinkSkill(id, skillId);
+    return { unlinked: true };
   }
 }

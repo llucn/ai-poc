@@ -47,15 +47,14 @@ CREATE TABLE IF NOT EXISTS t_agent (
   UNIQUE INDEX idx_agent_name (name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table: t_agent_tool
--- MCP servers registered for an agent. Linked to t_agent via agent_id
--- (plain column, no DB foreign key — referential integrity is enforced
--- in the application layer). One row per MCP server.
--- mcp_schema stores the parsed registration info as a JSON array of
--- { name, description, parameters } objects fetched from the server URL.
-CREATE TABLE IF NOT EXISTS t_agent_tool (
+-- Table: t_tool
+-- Top-level MCP server resource (one row per MCP server). Tools are shared
+-- across agents through the t_agent_tool association table. server_name is
+-- kebab-case and globally unique. mcp_schema stores the parsed registration
+-- info as a JSON array of { name, description, parameters } objects fetched
+-- from the server URL.
+CREATE TABLE IF NOT EXISTS t_tool (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  agent_id INT NOT NULL,
   server_name VARCHAR(255) NOT NULL,
   server_url VARCHAR(2048) NOT NULL,
   mcp_schema JSON NULL,
@@ -63,16 +62,15 @@ CREATE TABLE IF NOT EXISTS t_agent_tool (
   created_by VARCHAR(255) NOT NULL,
   updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   updated_by VARCHAR(255) NULL,
-  INDEX idx_agent_tool_agent_id (agent_id)
+  UNIQUE INDEX idx_tool_server_name (server_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Table: t_agent_skill
--- Skills associated with an agent. Linked to t_agent via agent_id
--- (plain column, no DB foreign key — referential integrity is enforced
--- in the application layer). content holds Markdown text.
-CREATE TABLE IF NOT EXISTS t_agent_skill (
+-- Table: t_skill
+-- Top-level Skill resource. Skills are shared across agents through the
+-- t_agent_skill association table. name is kebab-case and globally unique.
+-- content holds Markdown text.
+CREATE TABLE IF NOT EXISTS t_skill (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  agent_id INT NOT NULL,
   name VARCHAR(255) NOT NULL,
   description TEXT NULL,
   content LONGTEXT NULL,
@@ -80,7 +78,39 @@ CREATE TABLE IF NOT EXISTS t_agent_skill (
   created_by VARCHAR(255) NOT NULL,
   updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   updated_by VARCHAR(255) NULL,
-  INDEX idx_agent_skill_agent_id (agent_id)
+  UNIQUE INDEX idx_skill_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: t_agent_tool
+-- Association table linking an agent to a tool (many-to-many). Linked to
+-- t_agent via agent_id and t_tool via tool_id (plain columns, no DB foreign
+-- keys — referential integrity is enforced in the application layer).
+CREATE TABLE IF NOT EXISTS t_agent_tool (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  agent_id INT NOT NULL,
+  tool_id INT NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by VARCHAR(255) NOT NULL,
+  updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  updated_by VARCHAR(255) NULL,
+  INDEX idx_agent_tool_agent_id (agent_id),
+  INDEX idx_agent_tool_tool_id (tool_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: t_agent_skill
+-- Association table linking an agent to a skill (many-to-many). Linked to
+-- t_agent via agent_id and t_skill via skill_id (plain columns, no DB foreign
+-- keys — referential integrity is enforced in the application layer).
+CREATE TABLE IF NOT EXISTS t_agent_skill (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  agent_id INT NOT NULL,
+  skill_id INT NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by VARCHAR(255) NOT NULL,
+  updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  updated_by VARCHAR(255) NULL,
+  INDEX idx_agent_skill_agent_id (agent_id),
+  INDEX idx_agent_skill_skill_id (skill_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table: t_session

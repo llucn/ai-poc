@@ -12,6 +12,14 @@ import { AllAgentsPage } from './pages/settings/agents/all-agents';
 import { AgentDetailPage } from './pages/settings/agents/agent-detail';
 import { AddAgentPage } from './pages/settings/agents/add-agent';
 import { EditAgentPage } from './pages/settings/agents/edit-agent';
+import { AllToolsPage } from './pages/settings/tools/all-tools';
+import { ToolDetailPage } from './pages/settings/tools/tool-detail';
+import { AddToolPage } from './pages/settings/tools/add-tool';
+import { EditToolPage } from './pages/settings/tools/edit-tool';
+import { AllSkillsPage } from './pages/settings/skills/all-skills';
+import { SkillDetailPage } from './pages/settings/skills/skill-detail';
+import { AddSkillPage } from './pages/settings/skills/add-skill';
+import { EditSkillPage } from './pages/settings/skills/edit-skill';
 import { SessionListPage } from './pages/chat/session-list';
 import { ChatPage } from './pages/chat/chat-page';
 import { AppShell } from './shell/app-shell';
@@ -95,6 +103,70 @@ export function App() {
                   element={
                     <RequireRole role="SYSTEM_ADMIN">
                       <EditAgentPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/tools"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <AllToolsPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/tools/new"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <AddToolPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/tools/:id"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <ToolDetailPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/tools/:id/edit"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <EditToolPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/skills"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <AllSkillsPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/skills/new"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <AddSkillPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/skills/:id"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <SkillDetailPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/skills/:id/edit"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <EditSkillPage />
                     </RequireRole>
                   }
                 />

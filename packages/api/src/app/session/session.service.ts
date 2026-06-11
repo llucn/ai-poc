@@ -5,8 +5,12 @@ import { SessionEntity } from './session.entity';
 import { MessageEntity } from './message.entity';
 import { AgentEntity } from '../agent/agent.entity';
 import { AgentToolEntity } from '../agent/agent-tool.entity';
+import { AgentSkillEntity } from '../agent/agent-skill.entity';
+import { ToolEntity } from '../tool/tool.entity';
+import { SkillEntity } from '../skill/skill.entity';
 import { LlmService } from '../llm/llm.service';
 import { McpClientService } from '../mcp/mcp-client.service';
+import { SYSTEM_PROMPT } from '../agent/system-prompt';
 import type { CreateSessionDto, CreateMessageDto } from './session.dto';
 import type { Response } from 'express';
 
@@ -96,25 +100,27 @@ export function parseAssistantReply(llmOutput: string): ParsedReply {
 }
 
 /**
- * Parse a tool name in the format `mcp__${id}__${toolName}`.
+ * Parse a tool name in the format `mcp__${toolId}__${toolName}`.
  *
- * The tool name itself may contain underscores, so we split on the first
- * two `__` delimiters only. Returns null if the format doesn't match.
+ * `toolId` is the t_tool.id (the top-level Tool resource), so the same tool
+ * has a stable name across every agent that references it. The tool name
+ * itself may contain underscores, so we split on the first two `__`
+ * delimiters only. Returns null if the format doesn't match.
  *
  * Examples:
- *   "mcp__5__getWeatherForecastByLocation" → { agentToolId: 5, toolName: "getWeatherForecastByLocation" }
- *   "mcp__12__get_user_profile"             → { agentToolId: 12, toolName: "get_user_profile" }
+ *   "mcp__5__getWeatherForecastByLocation" → { toolId: 5, toolName: "getWeatherForecastByLocation" }
+ *   "mcp__12__get_user_profile"             → { toolId: 12, toolName: "get_user_profile" }
  *   "invalid_format"                         → null
  */
 export function parseToolName(
   tool: string
-): { agentToolId: number; toolName: string } | null {
+): { toolId: number; toolName: string } | null {
   const match = /^mcp__(\d+)__(.+)$/.exec(tool);
   if (!match) return null;
-  const agentToolId = Number(match[1]);
+  const toolId = Number(match[1]);
   const toolName = match[2];
-  if (!Number.isFinite(agentToolId) || toolName.length === 0) return null;
-  return { agentToolId, toolName };
+  if (!Number.isFinite(toolId) || toolName.length === 0) return null;
+  return { toolId, toolName };
 }
 
 /**
@@ -147,6 +153,12 @@ export class SessionService {
     private readonly agentRepository: Repository<AgentEntity>,
     @InjectRepository(AgentToolEntity)
     private readonly agentToolRepository: Repository<AgentToolEntity>,
+    @InjectRepository(AgentSkillEntity)
+    private readonly agentSkillRepository: Repository<AgentSkillEntity>,
+    @InjectRepository(ToolEntity)
+    private readonly toolRepository: Repository<ToolEntity>,
+    @InjectRepository(SkillEntity)
+    private readonly skillRepository: Repository<SkillEntity>,
     private readonly dataSource: DataSource,
     private readonly llmService: LlmService,
     private readonly mcpClientService: McpClientService
@@ -358,12 +370,12 @@ export class SessionService {
     });
     history.reverse();
 
-    const systemPrompt = agent.systemPrompt || 'You are a helpful assistant.';
+    const systemContent = await this.buildSystemContent(agent);
     const llmMessages: {
       role: 'system' | 'user' | 'assistant';
       content: string;
     }[] = [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: systemContent },
       ...history.map((msg) => ({
         role: (msg.userName === ASSISTANT_USER ? 'assistant' : 'user') as
           | 'user'
@@ -493,19 +505,105 @@ export class SessionService {
   }
 
   /**
+   * Build the system-role content for the LLM from four segments, joined by
+   * blank lines (empty segments are skipped except the available_* segments,
+   * which always render even when empty):
+   *   1. SYSTEM_PROMPT          — the process/protocol contract
+   *   2. agent.systemPrompt     — the agent-specific instructions
+   *   3. {"available_tools": [...]}   — tools the agent may call (flattened
+   *      from each associated Tool's mcp_schema; names are mcp__<toolId>__<name>)
+   *   4. {"available_skills": [...]}  — skills the agent may read
+   */
+  private async buildSystemContent(agent: AgentEntity): Promise<string> {
+    const availableTools = await this.getAvailableTools(agent.id);
+    const availableSkills = await this.getAvailableSkills(agent.id);
+
+    const segments = [
+      SYSTEM_PROMPT,
+      agent.systemPrompt ?? '',
+      JSON.stringify({ available_tools: availableTools }),
+      JSON.stringify({ available_skills: availableSkills }),
+    ].filter((s) => s && s.trim().length > 0);
+
+    return segments.join('\n\n');
+  }
+
+  /**
+   * Resolve the flattened tool list for an agent: join t_agent_tool + t_tool,
+   * then expand each Tool's mcp_schema. Each tool name is prefixed with the
+   * t_tool.id so it is globally stable: `mcp__<toolId>__<actualToolName>`.
+   */
+  private async getAvailableTools(agentId: number): Promise<
+    { name: string; description: string | null; parameters: unknown }[]
+  > {
+    const links = await this.agentToolRepository.find({
+      where: { agentId },
+      order: { id: 'ASC' },
+    });
+    if (links.length === 0) return [];
+
+    const tools = await this.toolRepository.find({
+      where: { id: In(links.map((l) => l.toolId)) },
+    });
+    const byId = new Map(tools.map((t) => [t.id, t]));
+
+    const result: {
+      name: string;
+      description: string | null;
+      parameters: unknown;
+    }[] = [];
+    for (const link of links) {
+      const tool = byId.get(link.toolId);
+      if (!tool || !tool.mcpSchema) continue;
+      for (const schema of tool.mcpSchema) {
+        result.push({
+          name: `mcp__${tool.id}__${schema.name}`,
+          description: schema.description ?? null,
+          parameters: schema.parameters ?? null,
+        });
+      }
+    }
+    return result;
+  }
+
+  /** Resolve the skill list for an agent: join t_agent_skill + t_skill. */
+  private async getAvailableSkills(
+    agentId: number
+  ): Promise<{ name: string; description: string }[]> {
+    const links = await this.agentSkillRepository.find({
+      where: { agentId },
+      order: { id: 'ASC' },
+    });
+    if (links.length === 0) return [];
+
+    const skills = await this.skillRepository.find({
+      where: { id: In(links.map((l) => l.skillId)) },
+    });
+    const byId = new Map(skills.map((s) => [s.id, s]));
+
+    const result: { name: string; description: string }[] = [];
+    for (const link of links) {
+      const skill = byId.get(link.skillId);
+      if (!skill) continue;
+      result.push({ name: skill.name, description: skill.description ?? '' });
+    }
+    return result;
+  }
+
+  /**
    * Execute one MCP tool call and return the observation message content.
    *
    * Handles three failure modes by returning an error observation (so the LLM
    * can react to them) instead of throwing:
-   *   - tool name doesn't match the `mcp__${id}__${toolName}` format
-   *   - the agent_tool row for the parsed id doesn't exist
+   *   - tool name doesn't match the `mcp__${toolId}__${toolName}` format
+   *   - the t_tool row for the parsed toolId doesn't exist
    *   - the MCP server call itself fails
    */
   private async executeTool(actionData: {
     tool: string;
     params: unknown;
   }): Promise<string> {
-    // Parse the tool name into agent tool ID + tool name.
+    // Parse the tool name into tool ID + tool name.
     const parsed = parseToolName(actionData.tool);
     if (!parsed) {
       this.logger.warn(`Invalid tool name format: ${actionData.tool}`);
@@ -514,21 +612,21 @@ export class SessionService {
       );
     }
 
-    // Look up the MCP server URL from t_agent_tool.
-    const agentTool = await this.agentToolRepository.findOne({
-      where: { id: parsed.agentToolId },
+    // Look up the MCP server URL from t_tool.
+    const tool = await this.toolRepository.findOne({
+      where: { id: parsed.toolId },
     });
-    if (!agentTool) {
-      this.logger.warn(`Agent tool not found: id=${parsed.agentToolId}`);
+    if (!tool) {
+      this.logger.warn(`Tool not found: id=${parsed.toolId}`);
       return buildErrorObservationContent(
-        `Agent tool with id ${parsed.agentToolId} not found.`
+        `Tool with id ${parsed.toolId} not found.`
       );
     }
 
     // Call the MCP tool.
     try {
       const result = await this.mcpClientService.callTool(
-        agentTool.serverUrl,
+        tool.serverUrl,
         parsed.toolName,
         actionData.params
       );
@@ -536,7 +634,7 @@ export class SessionService {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(
-        `MCP tool execution failed: tool=${parsed.toolName} url=${agentTool.serverUrl}: ${message}`
+        `MCP tool execution failed: tool=${parsed.toolName} url=${tool.serverUrl}: ${message}`
       );
       return buildErrorObservationContent(message);
     }

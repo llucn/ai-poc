@@ -6,6 +6,9 @@ import { SessionService } from './session.service';
 import { SessionController } from './session.controller';
 import { AgentEntity } from '../agent/agent.entity';
 import { AgentToolEntity } from '../agent/agent-tool.entity';
+import { AgentSkillEntity } from '../agent/agent-skill.entity';
+import { ToolEntity } from '../tool/tool.entity';
+import { SkillEntity } from '../skill/skill.entity';
 import { LlmModule } from '../llm/llm.module';
 import { McpModule } from '../mcp/mcp.module';
 
@@ -16,6 +19,9 @@ import { McpModule } from '../mcp/mcp.module';
       MessageEntity,
       AgentEntity,
       AgentToolEntity,
+      AgentSkillEntity,
+      ToolEntity,
+      SkillEntity,
     ]),
     LlmModule,
     McpModule,

@@ -11,10 +11,10 @@ export interface McpToolSchema {
   parameters?: unknown | null;
 }
 
-// One row per registered MCP server.
-export interface McpServer {
+// A Tool is a top-level resource (t_tool) associated with the agent through
+// t_agent_tool. The agent detail endpoint returns the resolved Tool rows.
+export interface AgentTool {
   id: number;
-  agentId: number;
   serverName: string;
   serverUrl: string;
   mcpSchema: McpToolSchema[] | null;
@@ -24,9 +24,10 @@ export interface McpServer {
   updatedBy?: string | null;
 }
 
+// A Skill is a top-level resource (t_skill) associated with the agent through
+// t_agent_skill.
 export interface AgentSkill {
   id: number;
-  agentId: number;
   name: string;
   description: string | null;
   content: string | null;
@@ -46,7 +47,7 @@ export interface Agent {
   hasApiKey: boolean;
   isDefault: number;
   systemPrompt: string | null;
-  tools?: McpServer[];
+  tools?: AgentTool[];
   skills?: AgentSkill[];
   createdOn: string;
   createdBy: string;

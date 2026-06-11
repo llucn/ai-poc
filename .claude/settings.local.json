@@ -64,7 +64,9 @@
       "Bash(echo \"=== api: $? ===\")",
       "Bash(echo \"=== web: $? ===\")",
       "Bash(echo \"=== web tsc: $? ===\")",
-      "Bash(grep -c \"\\\\.md$\")"
+      "Bash(grep -c \"\\\\.md$\")",
+      "Bash(git stash *)",
+      "Bash(perl -0pi -e 's/- \\\\[ \\\\] \\(8\\\\.[1-5]|9\\\\.[1-5]\\)/- [x] $1/g' openspec/changes/refact-agent/tasks.md)"
     ]
   }
 }

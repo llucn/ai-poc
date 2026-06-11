@@ -1,6 +1,7 @@
 import { useUser } from '../contexts/UserContext';
 import { AvatarMenu } from './avatar-menu';
 import { ThemeToggle } from './theme-toggle';
+import { TopbarMenu } from './topbar-menu';
 
 type Props = {
   isNarrow: boolean;
@@ -26,6 +27,7 @@ export function Topbar({ isNarrow, sidebarOpen, onToggleSidebar }: Props) {
         </button>
       )}
       <div className="topbar-title">AI Assistant System</div>
+      {!isNarrow && <TopbarMenu />}
       <div className="topbar-spacer" />
       <div className="topbar-actions">
         <ThemeToggle />

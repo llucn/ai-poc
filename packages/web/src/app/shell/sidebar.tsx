@@ -1,31 +1,13 @@
 import { useMemo, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useUserRole } from '../contexts/UserContext';
-import { DEMO_MENU, type MenuItem } from './menu-config';
+import { DEMO_MENU, filterMenuByRoles, type MenuItem } from './menu-config';
 
 type Props = {
   isNarrow: boolean;
   open: boolean;
   onNavigate: () => void;
 };
-
-function filterMenuByRoles(items: MenuItem[], userRole: string | null): MenuItem[] {
-  const result: MenuItem[] = [];
-  for (const item of items) {
-    if (item.roles && item.roles.length > 0) {
-      const allowed = userRole && item.roles.includes(userRole);
-      if (!allowed) continue;
-    }
-    if (item.children && item.children.length > 0) {
-      const filteredChildren = filterMenuByRoles(item.children, userRole);
-      if (filteredChildren.length === 0) continue;
-      result.push({ ...item, children: filteredChildren });
-    } else {
-      result.push(item);
-    }
-  }
-  return result;
-}
 
 export function Sidebar({ isNarrow, open, onNavigate }: Props) {
   const className = `sidebar${isNarrow && open ? ' open' : ''}`;

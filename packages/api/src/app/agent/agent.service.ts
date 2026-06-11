@@ -2,31 +2,31 @@ import {
   Injectable,
   ConflictException,
   NotFoundException,
-  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { AgentEntity } from './agent.entity';
-import { AgentToolEntity, type McpToolSchema } from './agent-tool.entity';
+import { AgentToolEntity } from './agent-tool.entity';
 import { AgentSkillEntity } from './agent-skill.entity';
+import { ToolEntity } from '../tool/tool.entity';
+import { SkillEntity } from '../skill/skill.entity';
 import { validateMarkdownContent } from '../utils/sanitize-markdown';
-import { McpClientService } from '../mcp/mcp-client.service';
 import type {
   CreateAgentDto,
   UpdateAgentDto,
-  RegisterMcpServerDto,
-  CreateSkillDto,
-  UpdateSkillDto,
 } from './agent.dto';
 
 // Agent shape returned to clients: the model authToken (API key) is never
 // sent back; modelConfig.authToken is nulled and a hasApiKey flag signals
 // whether one is stored so the UI can show a masked placeholder.
+//
+// tools / skills are the associated top-level resources (from t_tool / t_skill),
+// resolved through the t_agent_tool / t_agent_skill association tables.
 export type AgentResponse = AgentEntity & {
   hasApiKey: boolean;
-  tools: AgentToolEntity[];
-  skills: AgentSkillEntity[];
+  tools: ToolEntity[];
+  skills: SkillEntity[];
 };
 
 @Injectable()
@@ -40,21 +40,57 @@ export class AgentService {
     private readonly agentToolRepository: Repository<AgentToolEntity>,
     @InjectRepository(AgentSkillEntity)
     private readonly agentSkillRepository: Repository<AgentSkillEntity>,
-    private readonly dataSource: DataSource,
-    private readonly mcpClientService: McpClientService
+    @InjectRepository(ToolEntity)
+    private readonly toolRepository: Repository<ToolEntity>,
+    @InjectRepository(SkillEntity)
+    private readonly skillRepository: Repository<SkillEntity>,
+    private readonly dataSource: DataSource
   ) {}
 
   /** Strip the model authToken from an agent, exposing only hasApiKey. */
   private toResponse(
     agent: AgentEntity,
-    tools: AgentToolEntity[] = [],
-    skills: AgentSkillEntity[] = []
+    tools: ToolEntity[] = [],
+    skills: SkillEntity[] = []
   ): AgentResponse {
     const hasApiKey = !!agent.modelConfig?.authToken;
     const modelConfig = agent.modelConfig
       ? { ...agent.modelConfig, authToken: null }
       : agent.modelConfig;
     return { ...agent, modelConfig, hasApiKey, tools, skills };
+  }
+
+  /** Resolve the Tools associated with an agent through t_agent_tool. */
+  private async resolveTools(agentId: number): Promise<ToolEntity[]> {
+    const links = await this.agentToolRepository.find({
+      where: { agentId },
+      order: { id: 'ASC' },
+    });
+    if (links.length === 0) return [];
+    const tools = await this.toolRepository.find({
+      where: { id: In(links.map((l) => l.toolId)) },
+    });
+    // Preserve association order.
+    const byId = new Map(tools.map((t) => [t.id, t]));
+    return links
+      .map((l) => byId.get(l.toolId))
+      .filter((t): t is ToolEntity => !!t);
+  }
+
+  /** Resolve the Skills associated with an agent through t_agent_skill. */
+  private async resolveSkills(agentId: number): Promise<SkillEntity[]> {
+    const links = await this.agentSkillRepository.find({
+      where: { agentId },
+      order: { id: 'ASC' },
+    });
+    if (links.length === 0) return [];
+    const skills = await this.skillRepository.find({
+      where: { id: In(links.map((l) => l.skillId)) },
+    });
+    const byId = new Map(skills.map((s) => [s.id, s]));
+    return links
+      .map((l) => byId.get(l.skillId))
+      .filter((s): s is SkillEntity => !!s);
   }
 
   async findAll(page: number = 1, pageSize: number = 20) {
@@ -79,14 +115,8 @@ export class AgentService {
       throw new NotFoundException(`Agent with id ${id} not found`);
     }
 
-    const tools = await this.agentToolRepository.find({
-      where: { agentId: id },
-      order: { id: 'ASC' },
-    });
-    const skills = await this.agentSkillRepository.find({
-      where: { agentId: id },
-      order: { id: 'ASC' },
-    });
+    const tools = await this.resolveTools(id);
+    const skills = await this.resolveSkills(id);
 
     return this.toResponse(agent, tools, skills);
   }
@@ -156,9 +186,7 @@ export class AgentService {
       const incoming = dto.modelConfig;
       const existingToken = agent.modelConfig?.authToken ?? null;
       const nextToken =
-        incoming && incoming.authToken
-          ? incoming.authToken
-          : existingToken;
+        incoming && incoming.authToken ? incoming.authToken : existingToken;
       agent.modelConfig = incoming
         ? { ...incoming, authToken: nextToken }
         : incoming;
@@ -172,23 +200,13 @@ export class AgentService {
     const saved = await this.dataSource.transaction(async (manager) => {
       // Only one default agent allowed: clear others before saving this one.
       if (agent.isDefault === 1) {
-        await manager.update(
-          AgentEntity,
-          { isDefault: 1 },
-          { isDefault: 0 }
-        );
+        await manager.update(AgentEntity, { isDefault: 1 }, { isDefault: 0 });
       }
       return manager.save(AgentEntity, agent);
     });
 
-    const tools = await this.agentToolRepository.find({
-      where: { agentId: id },
-      order: { id: 'ASC' },
-    });
-    const skills = await this.agentSkillRepository.find({
-      where: { agentId: id },
-      order: { id: 'ASC' },
-    });
+    const tools = await this.resolveTools(id);
+    const skills = await this.resolveSkills(id);
     return this.toResponse(saved, tools, skills);
   }
 
@@ -219,8 +237,9 @@ export class AgentService {
   }
 
   /**
-   * Delete agents by IDs with cascading deletion of tools and skills.
-   * Application-level referential integrity enforcement.
+   * Delete agents by IDs with cascading deletion of tool/skill associations.
+   * Only the association rows are removed; the t_tool / t_skill resources are
+   * left intact (they may be shared by other agents).
    */
   async delete(ids: number[]): Promise<number> {
     if (!ids || ids.length === 0) {
@@ -228,14 +247,14 @@ export class AgentService {
     }
 
     return await this.dataSource.transaction(async (manager) => {
-      await manager.delete(AgentToolEntity, { agentId: ids as any });
-      await manager.delete(AgentSkillEntity, { agentId: ids as any });
+      await manager.delete(AgentToolEntity, { agentId: In(ids) });
+      await manager.delete(AgentSkillEntity, { agentId: In(ids) });
       const result = await manager.delete(AgentEntity, ids);
       return result.affected ?? 0;
     });
   }
 
-  // ===== MCP Servers =====
+  // ===== Tool associations =====
 
   private async ensureAgent(agentId: number): Promise<AgentEntity> {
     const agent = await this.agentRepository.findOne({ where: { id: agentId } });
@@ -245,161 +264,81 @@ export class AgentService {
     return agent;
   }
 
-  /**
-   * Fetch and parse the tool list from an MCP server URL.
-   *
-   * Delegates to McpClientService for MCP communication.
-   * Throws BadRequestException on failure.
-   */
-  async fetchMcpSchema(serverUrl: string): Promise<McpToolSchema[]> {
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(serverUrl);
-    } catch {
-      throw new BadRequestException('Invalid URL format');
+  /** Associate an existing Tool with an agent (idempotent). */
+  async linkTool(
+    agentId: number,
+    toolId: number,
+    createdBy: string
+  ): Promise<ToolEntity[]> {
+    await this.ensureAgent(agentId);
+    const tool = await this.toolRepository.findOne({ where: { id: toolId } });
+    if (!tool) {
+      throw new NotFoundException(`Tool with id ${toolId} not found`);
     }
 
-    const url = parsedUrl.toString();
-    try {
-      return await this.mcpClientService.fetchTools(url);
-    } catch (error: any) {
-      throw new BadRequestException(
-        `Failed to fetch MCP schema: ${error?.message ?? 'unknown error'}`
+    const existing = await this.agentToolRepository.findOne({
+      where: { agentId, toolId },
+    });
+    if (!existing) {
+      const link = this.agentToolRepository.create({
+        agentId,
+        toolId,
+        createdOn: new Date(),
+        createdBy,
+      });
+      await this.agentToolRepository.save(link);
+    }
+    return this.resolveTools(agentId);
+  }
+
+  /** Remove the association between an agent and a Tool (keeps the Tool). */
+  async unlinkTool(agentId: number, toolId: number): Promise<void> {
+    const result = await this.agentToolRepository.delete({ agentId, toolId });
+    if (!result.affected) {
+      throw new NotFoundException(
+        `Tool ${toolId} is not associated with agent ${agentId}`
       );
     }
   }
 
-  /** Test an MCP server URL without persisting; returns the parsed tools. */
-  async testMcpServer(serverUrl: string): Promise<{ tools: McpToolSchema[] }> {
-    const tools = await this.fetchMcpSchema(serverUrl);
-    return { tools };
-  }
+  // ===== Skill associations =====
 
-  async listMcpServers(agentId: number): Promise<AgentToolEntity[]> {
-    await this.ensureAgent(agentId);
-    return this.agentToolRepository.find({
-      where: { agentId },
-      order: { id: 'ASC' },
-    });
-  }
-
-  async registerMcpServer(
-    agentId: number,
-    dto: RegisterMcpServerDto,
-    createdBy: string
-  ): Promise<AgentToolEntity> {
-    await this.ensureAgent(agentId);
-    const mcpSchema = await this.fetchMcpSchema(dto.serverUrl);
-
-    const server = this.agentToolRepository.create({
-      agentId,
-      serverName: dto.serverName,
-      serverUrl: dto.serverUrl,
-      mcpSchema,
-      createdOn: new Date(),
-      createdBy,
-    });
-    return this.agentToolRepository.save(server);
-  }
-
-  async updateMcpServer(
-    agentId: number,
-    serverId: number,
-    dto: RegisterMcpServerDto,
-    updatedBy: string
-  ): Promise<AgentToolEntity> {
-    const server = await this.agentToolRepository.findOne({
-      where: { id: serverId, agentId },
-    });
-    if (!server) {
-      throw new NotFoundException(`MCP server with id ${serverId} not found`);
-    }
-
-    const mcpSchema = await this.fetchMcpSchema(dto.serverUrl);
-    server.serverName = dto.serverName;
-    server.serverUrl = dto.serverUrl;
-    server.mcpSchema = mcpSchema;
-    server.updatedOn = new Date();
-    server.updatedBy = updatedBy;
-    return this.agentToolRepository.save(server);
-  }
-
-  async deleteMcpServer(agentId: number, serverId: number): Promise<void> {
-    const result = await this.agentToolRepository.delete({
-      id: serverId,
-      agentId,
-    });
-    if (!result.affected) {
-      throw new NotFoundException(`MCP server with id ${serverId} not found`);
-    }
-  }
-
-  // ===== Skills =====
-
-  async createSkill(
-    agentId: number,
-    dto: CreateSkillDto,
-    createdBy: string
-  ): Promise<AgentSkillEntity> {
-    await this.ensureAgent(agentId);
-
-    if (dto.content) {
-      const validation = validateMarkdownContent(dto.content);
-      if (validation.warnings.length > 0) {
-        this.logger.warn(
-          `Markdown validation warnings for skill '${dto.name}': ${validation.warnings.join(', ')}`
-        );
-      }
-    }
-
-    const skill = this.agentSkillRepository.create({
-      agentId,
-      name: dto.name,
-      description: dto.description ?? null,
-      content: dto.content ?? null,
-      createdOn: new Date(),
-      createdBy,
-    });
-    return this.agentSkillRepository.save(skill);
-  }
-
-  async updateSkill(
+  /** Associate an existing Skill with an agent (idempotent). */
+  async linkSkill(
     agentId: number,
     skillId: number,
-    dto: UpdateSkillDto,
-    updatedBy: string
-  ): Promise<AgentSkillEntity> {
-    const skill = await this.agentSkillRepository.findOne({
-      where: { id: skillId, agentId },
+    createdBy: string
+  ): Promise<SkillEntity[]> {
+    await this.ensureAgent(agentId);
+    const skill = await this.skillRepository.findOne({
+      where: { id: skillId },
     });
     if (!skill) {
       throw new NotFoundException(`Skill with id ${skillId} not found`);
     }
 
-    if (dto.content) {
-      const validation = validateMarkdownContent(dto.content);
-      if (validation.warnings.length > 0) {
-        this.logger.warn(
-          `Markdown validation warnings for skill '${dto.name ?? skill.name}': ${validation.warnings.join(', ')}`
-        );
-      }
+    const existing = await this.agentSkillRepository.findOne({
+      where: { agentId, skillId },
+    });
+    if (!existing) {
+      const link = this.agentSkillRepository.create({
+        agentId,
+        skillId,
+        createdOn: new Date(),
+        createdBy,
+      });
+      await this.agentSkillRepository.save(link);
     }
-
-    if (dto.name !== undefined) skill.name = dto.name;
-    if (dto.description !== undefined) skill.description = dto.description;
-    if (dto.content !== undefined) skill.content = dto.content;
-    skill.updatedOn = new Date();
-    skill.updatedBy = updatedBy;
-    return this.agentSkillRepository.save(skill);
+    return this.resolveSkills(agentId);
   }
 
-  async deleteSkill(agentId: number, skillId: number): Promise<void> {
-    const result = await this.agentSkillRepository.delete({
-      id: skillId,
-      agentId,
-    });
+  /** Remove the association between an agent and a Skill (keeps the Skill). */
+  async unlinkSkill(agentId: number, skillId: number): Promise<void> {
+    const result = await this.agentSkillRepository.delete({ agentId, skillId });
     if (!result.affected) {
-      throw new NotFoundException(`Skill with id ${skillId} not found`);
+      throw new NotFoundException(
+        `Skill ${skillId} is not associated with agent ${agentId}`
+      );
     }
   }
 }

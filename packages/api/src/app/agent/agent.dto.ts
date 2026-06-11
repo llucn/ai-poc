@@ -1,13 +1,6 @@
 import type { AgentModelConfig } from './agent.entity';
 import type { McpToolSchema } from './agent-tool.entity';
 
-export interface AgentSkillDto {
-  id?: number;
-  name: string;
-  description?: string | null;
-  content?: string | null;
-}
-
 // Create only sets basic info. System prompt, tools and skills are
 // managed separately from the Agent Detail page after creation.
 // The model auth token (API key) is carried inside modelConfig.authToken.
@@ -35,28 +28,14 @@ export interface DeleteAgentsDto {
   ids: number[];
 }
 
-// Register / update an MCP server by URL. The backend fetches the MCP
-// server's tool listing and stores it as mcpSchema.
-export interface RegisterMcpServerDto {
-  serverName: string;
-  serverUrl: string;
+// Associate an existing top-level Tool with this agent.
+export interface LinkToolDto {
+  toolId: number;
 }
 
-// Test an MCP server URL without persisting. Returns the parsed tool list.
-export interface TestMcpServerDto {
-  serverUrl: string;
-}
-
-export interface CreateSkillDto {
-  name: string;
-  description?: string | null;
-  content?: string | null;
-}
-
-export interface UpdateSkillDto {
-  name?: string;
-  description?: string | null;
-  content?: string | null;
+// Associate an existing top-level Skill with this agent.
+export interface LinkSkillDto {
+  skillId: number;
 }
 
 export type { McpToolSchema };

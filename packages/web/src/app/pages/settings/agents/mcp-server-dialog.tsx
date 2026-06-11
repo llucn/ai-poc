@@ -1,71 +1,85 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useApiFetch } from '../../../auth/use-api-fetch';
-import type { McpServer, McpToolSchema } from './types';
+import type { AgentTool } from './types';
 
 type Props = {
   agentId: number;
-  // When provided, the dialog is in edit mode for this server.
-  server?: McpServer | null;
+  // IDs of tools already associated with this agent (pre-checked, disabled).
+  linkedToolIds: number[];
   onSaved: () => void;
   onCancel: () => void;
 };
 
-// Modal to register or edit an MCP server. The user enters a name and URL,
-// presses Test to fetch the tool list, and Save persists once the test
-// succeeds.
-export function McpServerDialog({ agentId, server, onSaved, onCancel }: Props) {
+// Modal to associate existing global Tools with an agent. Shows the full Tools
+// list with checkboxes; confirming links the newly-checked tools. Already
+// linked tools are pre-checked and disabled (unlink from the detail table).
+export function McpServerDialog({
+  agentId,
+  linkedToolIds,
+  onSaved,
+  onCancel,
+}: Props) {
   const apiFetch = useApiFetch();
-  const isEdit = !!server;
+  const linkedSet = new Set(linkedToolIds);
 
-  const [serverName, setServerName] = useState(server?.serverName ?? '');
-  const [serverUrl, setServerUrl] = useState(server?.serverUrl ?? '');
-  // Tools start populated in edit mode; a URL change requires a fresh Test.
-  const [tools, setTools] = useState<McpToolSchema[] | null>(
-    server?.mcpSchema ?? null
+  const [tools, setTools] = useState<AgentTool[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [checked, setChecked] = useState<ReadonlySet<number>>(
+    () => new Set<number>()
   );
-  const [tested, setTested] = useState(isEdit);
-  const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const nameTrimmed = serverName.trim();
-  const urlTrimmed = serverUrl.trim();
-
-  const onTest = async () => {
-    if (!urlTrimmed) return;
-    setTesting(true);
-    setError(null);
-    try {
-      const res = await apiFetch(`/agents/${agentId}/mcp-servers/test`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serverUrl: urlTrimmed }),
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiFetch('/tools?page=1&pageSize=200')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) {
+          setTools(data.data || []);
+          setLoadError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setLoadError(
+            err instanceof Error ? err.message : 'Failed to load tools'
+          );
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
-      const data = await res.json();
-      setTools(data.tools || []);
-      setTested(true);
-    } catch (err) {
-      setTools(null);
-      setTested(false);
-      setError(err instanceof Error ? err.message : 'Test failed');
-    } finally {
-      setTesting(false);
-    }
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFetch]);
+
+  const toggle = (id: number) => {
+    if (linkedSet.has(id)) return;
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   const onSave = async () => {
-    if (!nameTrimmed || !urlTrimmed || !tested) return;
+    const toLink = Array.from(checked);
+    if (toLink.length === 0 || saving) return;
     setSaving(true);
     setError(null);
     try {
-      const path = isEdit
-        ? `/agents/${agentId}/mcp-servers/${server!.id}`
-        : `/agents/${agentId}/mcp-servers`;
-      await apiFetch(path, {
-        method: isEdit ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serverName: nameTrimmed, serverUrl: urlTrimmed }),
-      });
+      // Link each selected tool. The endpoint is idempotent.
+      for (const toolId of toLink) {
+        await apiFetch(`/agents/${agentId}/tools`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ toolId }),
+        });
+      }
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
@@ -74,15 +88,14 @@ export function McpServerDialog({ agentId, server, onSaved, onCancel }: Props) {
     }
   };
 
-  const busy = testing || saving;
-  const saveDisabled = !nameTrimmed || !urlTrimmed || !tested || busy;
+  const saveDisabled = checked.size === 0 || saving;
 
   return (
     <div
       className="ic-modal-overlay"
       role="presentation"
       onClick={(e) => {
-        if (e.target === e.currentTarget && !busy) onCancel();
+        if (e.target === e.currentTarget && !saving) onCancel();
       }}
     >
       <div
@@ -92,71 +105,57 @@ export function McpServerDialog({ agentId, server, onSaved, onCancel }: Props) {
         aria-labelledby="ic-mcp-title"
       >
         <h2 id="ic-mcp-title" className="ic-modal-title">
-          Register MCP Server
+          Add Tools
         </h2>
         <div className="ic-modal-body">
-          <div className="ic-field">
-            <label className="ic-field-label" htmlFor="mcp-name">
-              Server Name *
-            </label>
-            <input
-              id="mcp-name"
-              type="text"
-              className="ic-input"
-              value={serverName}
-              maxLength={255}
-              onChange={(e) => setServerName(e.target.value)}
-              disabled={busy}
-              autoComplete="off"
-            />
-          </div>
-
-          <div className="ic-field">
-            <label className="ic-field-label" htmlFor="mcp-url">
-              URL *
-            </label>
-            <div className="ic-input-group">
-              <input
-                id="mcp-url"
-                type="url"
-                className="ic-input"
-                value={serverUrl}
-                onChange={(e) => {
-                  setServerUrl(e.target.value);
-                  // URL changed: require a fresh test before saving.
-                  setTested(false);
-                }}
-                disabled={busy}
-                autoComplete="off"
-                placeholder="https://mcp.example.com"
-              />
-              <button
-                type="button"
-                className="ic-btn ic-btn-secondary"
-                onClick={onTest}
-                disabled={!urlTrimmed || busy}
-              >
-                {testing ? 'Testing…' : 'Test'}
-              </button>
-            </div>
-          </div>
-
-          {tested && tools && (
-            <div className="ic-field">
-              <label className="ic-field-label">
-                Tools ({tools.length})
-              </label>
-              {tools.length === 0 ? (
-                <p className="ic-field-hint">No tools found on this server.</p>
-              ) : (
-                <div className="ic-tag-list">
-                  {tools.map((t, idx) => (
-                    <span className="ic-tag" key={`${t.name}-${idx}`}>
-                      {t.name}
-                    </span>
-                  ))}
-                </div>
-              )}
+          {loading ? (
+            <p className="ic-field-hint">Loading…</p>
+          ) : loadError ? (
+            <p className="ic-error-block" role="alert">
+              {loadError}
+            </p>
+          ) : tools.length === 0 ? (
+            <p className="ic-field-hint">
+              No tools available. Create one under the Tools menu first.
+            </p>
+          ) : (
+            <div className="ic-table-wrap">
+              <table className="ic-table">
+                <thead>
+                  <tr>
+                    <th className="ic-col-check"></th>
+                    <th className="ic-col-id">ID</th>
+                    <th>Server Name</th>
+                    <th>URL</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tools.map((tool) => {
+                    const isLinked = linkedSet.has(tool.id);
+                    return (
+                      <tr key={tool.id}>
+                        <td className="ic-col-check">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${tool.serverName}`}
+                            checked={isLinked || checked.has(tool.id)}
+                            disabled={isLinked || saving}
+                            onChange={() => toggle(tool.id)}
+                          />
+                        </td>
+                        <td className="ic-col-id">#{tool.id}</td>
+                        <td>
+                          {tool.serverName}
+                          {isLinked && (
+                            <span className="ic-field-hint"> (linked)</span>
+                          )}
+                        </td>
+                        <td className="ic-col-url">{tool.serverUrl}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
 
@@ -171,7 +170,7 @@ export function McpServerDialog({ agentId, server, onSaved, onCancel }: Props) {
             type="button"
             className="ic-btn ic-btn-secondary"
             onClick={onCancel}
-            disabled={busy}
+            disabled={saving}
           >
             Cancel
           </button>
@@ -181,7 +180,7 @@ export function McpServerDialog({ agentId, server, onSaved, onCancel }: Props) {
             onClick={onSave}
             disabled={saveDisabled}
           >
-            {saving ? 'Saving…' : 'Save'}
+            {saving ? 'Saving…' : 'Confirm'}
           </button>
         </div>
       </div>

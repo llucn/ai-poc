@@ -269,6 +269,84 @@ button {
   flex: 1;
 }
 
+/* Wide-viewport primary menu in the topbar */
+.topbar-menu {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+}
+
+.topbar-menu-group {
+  position: relative;
+}
+
+.topbar-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--muted2);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.topbar-menu-button:hover {
+  color: var(--text);
+  background: var(--hover-subtle);
+}
+
+.topbar-menu-button.open {
+  color: var(--text);
+  background: var(--hover-subtle);
+}
+
+.topbar-menu-chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.topbar-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 180px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.topbar-menu-item:hover {
+  background: var(--hover-subtle);
+  color: var(--accent);
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;

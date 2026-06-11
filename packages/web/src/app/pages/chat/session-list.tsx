@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useApiFetch } from '../../auth/use-api-fetch';
 import { ConfirmDeleteDialog } from '../../components/confirm-delete-dialog';
 import type { Session } from './types';
@@ -7,7 +7,6 @@ import type { Session } from './types';
 const PAGE_SIZE = 20;
 
 export function SessionListPage() {
-  const navigate = useNavigate();
   const apiFetch = useApiFetch();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);

@@ -15,18 +15,16 @@ import { ConfirmDeleteDialog } from '../../../components/confirm-delete-dialog';
 import { SystemPromptEditor } from './system-prompt-editor';
 import { McpServerDialog } from './mcp-server-dialog';
 import { SkillDialog } from './skill-dialog';
-import type { Agent, AgentSkill, McpServer } from './types';
+import type { Agent, AgentSkill, AgentTool } from './types';
 
 // Tracks the open dialog (if any) on the detail page.
 type DialogState =
   | { kind: 'none' }
   | { kind: 'system-prompt' }
-  | { kind: 'mcp-add' }
-  | { kind: 'mcp-edit'; server: McpServer }
-  | { kind: 'mcp-delete'; server: McpServer }
+  | { kind: 'tool-add' }
+  | { kind: 'tool-remove'; tool: AgentTool }
   | { kind: 'skill-add' }
-  | { kind: 'skill-edit'; skill: AgentSkill }
-  | { kind: 'skill-delete'; skill: AgentSkill }
+  | { kind: 'skill-remove'; skill: AgentSkill }
   | { kind: 'agent-delete' };
 
 export function AgentDetailPage() {
@@ -108,12 +106,12 @@ export function AgentDetailPage() {
     }
   }, [apiFetch, id, navigate]);
 
-  const onDeleteMcpServer = useCallback(
-    async (serverId: number) => {
+  const onUnlinkTool = useCallback(
+    async (toolId: number) => {
       if (id === null) return;
       setBusy(true);
       try {
-        await apiFetch(`/agents/${id}/mcp-servers/${serverId}`, {
+        await apiFetch(`/agents/${id}/tools/${toolId}`, {
           method: 'DELETE',
         });
         await loadAgent();
@@ -125,7 +123,7 @@ export function AgentDetailPage() {
     [apiFetch, id, loadAgent]
   );
 
-  const onDeleteSkill = useCallback(
+  const onUnlinkSkill = useCallback(
     async (skillId: number) => {
       if (id === null) return;
       setBusy(true);
@@ -142,28 +140,27 @@ export function AgentDetailPage() {
     [apiFetch, id, loadAgent]
   );
 
-  // Test each registered MCP server's reachability for the Status column.
+  // Test each associated Tool's reachability for the Status column.
   const checkServerStatus = useCallback(
-    async (servers: McpServer[]) => {
-      if (id === null) return;
+    async (toolList: AgentTool[]) => {
       const entries = await Promise.all(
-        servers.map(async (s) => {
+        toolList.map(async (t) => {
           try {
-            const res = await apiFetch(`/agents/${id}/mcp-servers/test`, {
+            const res = await apiFetch(`/tools/test`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ serverUrl: s.serverUrl }),
+              body: JSON.stringify({ serverUrl: t.serverUrl }),
             });
             await res.json();
-            return [s.id, true] as const;
+            return [t.id, true] as const;
           } catch {
-            return [s.id, false] as const;
+            return [t.id, false] as const;
           }
         })
       );
       setServerStatus(Object.fromEntries(entries));
     },
-    [apiFetch, id]
+    [apiFetch]
   );
 
   // Refresh server status whenever the tool list changes.
@@ -266,16 +263,16 @@ export function AgentDetailPage() {
         )}
       </section>
 
-      {/* Tools (MCP Servers) */}
+      {/* Tools (associated from the global Tools catalog) */}
       <section className="ic-section">
         <div className="ic-section-header">
           <h2 className="ic-section-title">Tools</h2>
           <button
             type="button"
             className="ic-icon-btn"
-            aria-label="Add MCP server"
+            aria-label="Add tool"
             title="Add"
-            onClick={() => setDialog({ kind: 'mcp-add' })}
+            onClick={() => setDialog({ kind: 'tool-add' })}
           >
             <FontAwesomeIcon icon={faPlus} />
           </button>
@@ -296,32 +293,32 @@ export function AgentDetailPage() {
               {tools.length === 0 ? (
                 <tr>
                   <td className="ic-table-empty" colSpan={6}>
-                    No MCP servers registered.
+                    No tools associated.
                   </td>
                 </tr>
               ) : (
-                tools.map((server) => (
-                  <tr key={server.id}>
-                    <td className="ic-col-id">#{server.id}</td>
-                    <td>{server.serverName}</td>
-                    <td className="ic-col-url">{server.serverUrl}</td>
+                tools.map((tool) => (
+                  <tr key={tool.id}>
+                    <td className="ic-col-id">#{tool.id}</td>
+                    <td>{tool.serverName}</td>
+                    <td className="ic-col-url">{tool.serverUrl}</td>
                     <td>
                       <div className="ic-tag-list">
-                        {(server.mcpSchema ?? []).map((t, idx) => (
+                        {(tool.mcpSchema ?? []).map((t, idx) => (
                           <span className="ic-tag" key={`${t.name}-${idx}`}>
                             {t.name}
                           </span>
                         ))}
-                        {(!server.mcpSchema ||
-                          server.mcpSchema.length === 0) && (
+                        {(!tool.mcpSchema ||
+                          tool.mcpSchema.length === 0) && (
                           <span className="ic-field-hint">—</span>
                         )}
                       </div>
                     </td>
                     <td className="ic-col-icon">
-                      {serverStatus[server.id] === undefined ? (
+                      {serverStatus[tool.id] === undefined ? (
                         <span className="ic-field-hint">…</span>
-                      ) : serverStatus[server.id] ? (
+                      ) : serverStatus[tool.id] ? (
                         <FontAwesomeIcon
                           icon={faCircleCheck}
                           className="ic-icon-yes"
@@ -338,23 +335,10 @@ export function AgentDetailPage() {
                     <td className="ic-col-actions">
                       <button
                         type="button"
-                        className="ic-icon-btn"
-                        aria-label={`Edit ${server.serverName}`}
-                        title="Edit"
-                        onClick={() =>
-                          setDialog({ kind: 'mcp-edit', server })
-                        }
-                      >
-                        <FontAwesomeIcon icon={faPen} />
-                      </button>
-                      <button
-                        type="button"
                         className="ic-icon-btn ic-icon-btn-danger"
-                        aria-label={`Delete ${server.serverName}`}
-                        title="Delete"
-                        onClick={() =>
-                          setDialog({ kind: 'mcp-delete', server })
-                        }
+                        aria-label={`Remove ${tool.serverName}`}
+                        title="Remove"
+                        onClick={() => setDialog({ kind: 'tool-remove', tool })}
                       >
                         <FontAwesomeIcon icon={faTrash} />
                       </button>
@@ -407,20 +391,11 @@ export function AgentDetailPage() {
                     <td className="ic-col-actions">
                       <button
                         type="button"
-                        className="ic-icon-btn"
-                        aria-label={`Edit ${skill.name}`}
-                        title="Edit"
-                        onClick={() => setDialog({ kind: 'skill-edit', skill })}
-                      >
-                        <FontAwesomeIcon icon={faPen} />
-                      </button>
-                      <button
-                        type="button"
                         className="ic-icon-btn ic-icon-btn-danger"
-                        aria-label={`Delete ${skill.name}`}
-                        title="Delete"
+                        aria-label={`Remove ${skill.name}`}
+                        title="Remove"
                         onClick={() =>
-                          setDialog({ kind: 'skill-delete', skill })
+                          setDialog({ kind: 'skill-remove', skill })
                         }
                       >
                         <FontAwesomeIcon icon={faTrash} />
@@ -444,9 +419,10 @@ export function AgentDetailPage() {
         />
       )}
 
-      {dialog.kind === 'mcp-add' && (
+      {dialog.kind === 'tool-add' && (
         <McpServerDialog
           agentId={agent.id}
+          linkedToolIds={tools.map((t) => t.id)}
           onSaved={() => {
             loadAgent();
             setDialog({ kind: 'none' });
@@ -455,30 +431,19 @@ export function AgentDetailPage() {
         />
       )}
 
-      {dialog.kind === 'mcp-edit' && (
-        <McpServerDialog
-          agentId={agent.id}
-          server={dialog.server}
-          onSaved={() => {
-            loadAgent();
-            setDialog({ kind: 'none' });
-          }}
-          onCancel={closeDialog}
-        />
-      )}
-
-      {dialog.kind === 'mcp-delete' && (
+      {dialog.kind === 'tool-remove' && (
         <ConfirmDeleteDialog
           busy={busy}
-          message="Delete tool?"
+          message={`Remove tool "${dialog.tool.serverName}" from this agent?`}
           onCancel={closeDialog}
-          onConfirm={() => onDeleteMcpServer(dialog.server.id)}
+          onConfirm={() => onUnlinkTool(dialog.tool.id)}
         />
       )}
 
       {dialog.kind === 'skill-add' && (
         <SkillDialog
           agentId={agent.id}
+          linkedSkillIds={skills.map((s) => s.id)}
           onSaved={() => {
             loadAgent();
             setDialog({ kind: 'none' });
@@ -487,24 +452,12 @@ export function AgentDetailPage() {
         />
       )}
 
-      {dialog.kind === 'skill-edit' && (
-        <SkillDialog
-          agentId={agent.id}
-          skill={dialog.skill}
-          onSaved={() => {
-            loadAgent();
-            setDialog({ kind: 'none' });
-          }}
-          onCancel={closeDialog}
-        />
-      )}
-
-      {dialog.kind === 'skill-delete' && (
+      {dialog.kind === 'skill-remove' && (
         <ConfirmDeleteDialog
           busy={busy}
-          message="Delete skill?"
+          message={`Remove skill "${dialog.skill.name}" from this agent?`}
           onCancel={closeDialog}
-          onConfirm={() => onDeleteSkill(dialog.skill.id)}
+          onConfirm={() => onUnlinkSkill(dialog.skill.id)}
         />
       )}
 

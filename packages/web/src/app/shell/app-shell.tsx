@@ -24,11 +24,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="app-layout">
-      <Sidebar
-        isNarrow={isNarrow}
-        open={sidebarOpen}
-        onNavigate={() => setSidebarOpen(false)}
-      />
+      {isNarrow && (
+        <Sidebar
+          isNarrow={isNarrow}
+          open={sidebarOpen}
+          onNavigate={() => setSidebarOpen(false)}
+        />
+      )}
       {showOverlay && (
         <div
           className="sidebar-overlay"

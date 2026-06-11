@@ -13,6 +13,8 @@ import { MeModule } from './me/me.module';
 import { UserEntity } from './user/user.entity';
 import { UserModule } from './user/user.module';
 import { AgentModule } from './agent/agent.module';
+import { ToolModule } from './tool/tool.module';
+import { SkillModule } from './skill/skill.module';
 import { SessionModule } from './session/session.module';
 import { LlmModule } from './llm/llm.module';
 
@@ -29,6 +31,8 @@ import { LlmModule } from './llm/llm.module';
     MeModule,
     UserModule,
     AgentModule,
+    ToolModule,
+    SkillModule,
     SessionModule,
     LlmModule,
   ],

@@ -218,11 +218,19 @@ export class McpClientService {
       return { name: 'unknown', description: null, parameters: null };
     }
     const obj = item as Record<string, unknown>;
+    // The MCP spec exposes a tool's parameter schema under `inputSchema`.
+    // Accept `parameters` too as a fallback for non-standard servers.
+    const parameters =
+      obj.inputSchema !== undefined
+        ? obj.inputSchema
+        : obj.parameters !== undefined
+          ? obj.parameters
+          : null;
     return {
       name: typeof obj.name === 'string' ? obj.name : 'unknown',
       description:
         typeof obj.description === 'string' ? obj.description : null,
-      parameters: obj.parameters !== undefined ? obj.parameters : null,
+      parameters,
     };
   }
 }

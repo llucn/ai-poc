@@ -16,6 +16,7 @@ import { SkillEntity } from '../skill/skill.entity';
 import { LlmService } from '../llm/llm.service';
 import { McpClientService } from '../mcp/mcp-client.service';
 import { SYSTEM_PROMPT } from '../agent/system-prompt';
+import { extractJsonObject } from '../utils/extract-json';
 import type {
   CreateSessionDto,
   CreateMessageDto,
@@ -54,8 +55,12 @@ export type ParsedReply =
  */
 export function parseAssistantReply(llmOutput: string): ParsedReply {
   let parsed: unknown;
+  // LLMs sometimes wrap the JSON in a Markdown code fence or surround it with
+  // prose despite the system prompt forbidding it. Peel those wrappers off
+  // before parsing so a formatting slip doesn't abort the whole turn.
+  const cleaned = extractJsonObject(llmOutput);
   try {
-    parsed = JSON.parse(llmOutput);
+    parsed = JSON.parse(cleaned);
   } catch (err) {
     const detail = err instanceof Error ? err.message : 'unknown error';
     return {

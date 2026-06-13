@@ -72,7 +72,15 @@
       "Bash(echo \"===API EXIT: $?===\")",
       "Bash(echo \"===WEB EXIT: $?\")",
       "Bash(npx vitest *)",
-      "Bash(echo \"---EXIT:$?---\")"
+      "Bash(echo \"---EXIT:$?---\")",
+      "Bash(echo \"exit=$?\")",
+      "Bash(perl -0pi -e 's/- \\\\[ \\\\] \\(1\\\\.1|1\\\\.2|1\\\\.3|2\\\\.1|2\\\\.2|2\\\\.3|2\\\\.4|2\\\\.5|3\\\\.1|3\\\\.2|3\\\\.3|3\\\\.4|3\\\\.5|4\\\\.1|4\\\\.2|4\\\\.3\\)/- [x] $1/g' openspec/changes/client-tool-select-users/tasks.md)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('progress:', d['progress']\\); print\\('remaining tasks:'\\); [print\\(' -', t['description']\\) for t in d['tasks'] if not t['done']]\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('progress:', d['progress']\\); print\\('remaining:'\\); [print\\(' -', t['description']\\) for t in d['tasks'] if not t['done']]\")",
+      "Bash(grep -n \"json\\\\|JSON\\\\|code block\\\\|\\\\`\\\\`\\\\`\\\\|final_answer\\\\|action\" packages/api/src/app/agent/system-prompt.ts)",
+      "Bash(echo \"tsc=$?\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(i\\) for i in d]\")",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

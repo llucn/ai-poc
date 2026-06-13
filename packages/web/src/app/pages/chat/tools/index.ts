@@ -7,3 +7,4 @@
 // must be fully evaluated before any tool file runs.
 import './console-log-echo';
 import './prompt-input';
+import './select-users';

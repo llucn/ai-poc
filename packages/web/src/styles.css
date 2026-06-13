@@ -1347,6 +1347,99 @@ textarea.ic-input {
  * Chat UI Styles
  * ============================================================ */
 
+/* Horizontal layout: conversation column + (optional) Tool Area.
+ * The Tool Area renders only while a Client Tool requests a UI; when absent,
+ * the chat column keeps its own max-width and sits on the left. */
+.chat-layout {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  height: 100%;
+  min-width: 0;
+}
+
+/* In-page Tool Area: docked to the right of the conversation, shown only while
+ * a Client Tool is active.
+ *
+ * To make BOTH the Tool Area and the Chat Area animate, we transition the Tool
+ * Area's actual layout width (flex-basis / min-width / max-width / margin)
+ * rather than a transform. The base rule below is the COLLAPSED state (zero
+ * width); .chat-tool-area--open is the expanded state. Because the chat column
+ * is `flex: 1 1 auto`, it smoothly reclaims/yields the space as the Tool Area's
+ * footprint grows and shrinks. The component mounts in the collapsed state,
+ * flips to --open on the next frame (entry), and on close drops --open and
+ * unmounts on transitionend. */
+.chat-tool-area {
+  flex: 0 0 0;
+  min-width: 0;
+  max-width: 0;
+  margin-left: 0;
+  opacity: 0;
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  overflow: hidden;
+  transition:
+    flex-grow 0.28s ease,
+    flex-basis 0.28s ease,
+    min-width 0.28s ease,
+    max-width 0.28s ease,
+    margin-left 0.28s ease,
+    opacity 0.28s ease;
+}
+
+.chat-tool-area--open {
+  flex: 1 1 570px;
+  min-width: 480px;
+  max-width: 780px;
+  margin-left: 12px;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-tool-area {
+    transition-duration: 0.01ms;
+  }
+}
+
+.chat-tool-area-inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+/* select-users (and future tool) panel inside the Tool Area. */
+.chat-tool-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.chat-tool-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.chat-tool-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.chat-tool-actions-btns {
+  display: flex;
+  gap: 8px;
+}
+
 .chat-container {
   display: flex;
   flex-direction: column;
@@ -1354,6 +1447,11 @@ textarea.ic-input {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   max-width: 960px;
+  flex: 1 1 auto;
+  /* Lower bound so the Tool Area can't squeeze the conversation too narrow.
+   * Below the layout's combined min-widths the row will scroll/overflow
+   * rather than shrink chat further. */
+  min-width: 360px;
   background: var(--background);
   height: 100%;
 }

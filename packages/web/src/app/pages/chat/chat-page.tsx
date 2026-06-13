@@ -7,6 +7,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useApiFetch } from '../../auth/use-api-fetch';
 import { useUser } from '../../contexts/UserContext';
 import { executeClientTool } from './client-tool-executor';
+import { clearToolArea } from './tool-area-bridge';
+import { ToolArea } from './tool-area';
 import { ThoughtMessage } from './thought-message';
 import type { Message, Session } from './types';
 
@@ -243,6 +245,10 @@ export function ChatPage() {
       setError(err instanceof Error ? err.message : 'Failed to send message');
       setInput(content);
       removeThinker();
+      // Safety net: if the turn errored while a Client Tool UI was open, don't
+      // leave the Tool Area stuck — collapse it.
+      clearToolArea();
+      setPendingClientTool(null);
     } finally {
       setSending(false);
       // Refocus textarea for next message
@@ -268,14 +274,18 @@ export function ChatPage() {
 
   if (loading) {
     return (
-      <section className="chat-container" aria-busy="true">
-        <div className="chat-loading">Loading…</div>
-      </section>
+      <div className="chat-layout">
+        <section className="chat-container" aria-busy="true">
+          <div className="chat-loading">Loading…</div>
+        </section>
+        <ToolArea />
+      </div>
     );
   }
 
   return (
-    <section className="chat-container">
+    <div className="chat-layout">
+      <section className="chat-container">
       <div className="chat-messages">
         {isNew && messages.length === 0 && (
           <div className="chat-welcome">
@@ -374,5 +384,7 @@ export function ChatPage() {
         </button>
       </div>
     </section>
+      <ToolArea />
+    </div>
   );
 }

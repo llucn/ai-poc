@@ -27,6 +27,26 @@ export class UserService {
     };
   }
 
+  // Minimal, read-only listing for the select-users Client Tool picker.
+  // Projects only the fields the picker shows (no role/skillMatrix), and is
+  // usable by any authenticated user (see UserController.selectable).
+  async findSelectable(page: number = 1, pageSize: number = 10) {
+    const [users, total] = await this.userRepository.findAndCount({
+      select: ['id', 'name', 'displayName', 'email'],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      order: { id: 'ASC' },
+    });
+
+    return {
+      data: users,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
+  }
+
   async exists(name: string): Promise<{ name: boolean }> {
     if (!name.trim()) {
       return { name: false };

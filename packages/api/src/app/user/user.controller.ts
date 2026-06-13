@@ -25,6 +25,22 @@ export class UserController {
     return this.userService.exists(name || '');
   }
 
+  // Read-only, paginated listing for the `select-users` Client Tool picker.
+  // The class is @Roles('SYSTEM_ADMIN'); an empty @Roles() here overrides that
+  // so any authenticated user can list users (the global HeaderAuthGuard still
+  // requires login). Declared before @Get(':id') so 'selectable' isn't parsed
+  // as an :id. Returns only name/displayName/email — no role or skill data.
+  @Get('selectable')
+  @Roles()
+  async selectable(
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    const pageNum = page ? parseInt(page, 10) : 1;
+    const pageSizeNum = pageSize ? parseInt(pageSize, 10) : 10;
+    return this.userService.findSelectable(pageNum, pageSizeNum);
+  }
+
   @Get()
   async findAll(
     @Query('page') page?: string,

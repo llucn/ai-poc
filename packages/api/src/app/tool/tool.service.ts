@@ -144,6 +144,7 @@ export class ToolService {
       serverName: dto.serverName,
       serverUrl,
       kind,
+      source: 'database',
       mcpSchema,
       createdOn: new Date(),
       createdBy,

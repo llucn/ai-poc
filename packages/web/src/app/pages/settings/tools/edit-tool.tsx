@@ -14,6 +14,7 @@ export function EditToolPage() {
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [isRegistry, setIsRegistry] = useState(false);
 
   const [kind, setKind] = useState<ToolKind>('mcp');
   const [serverName, setServerName] = useState('');
@@ -41,6 +42,7 @@ export function EditToolPage() {
       .then((res) => res.json())
       .then((data: Tool) => {
         if (cancelled) return;
+        setIsRegistry(data.source === 'registry');
         setKind(data.kind);
         setServerName(data.serverName);
         setServerUrl(data.serverUrl);
@@ -161,6 +163,22 @@ export function EditToolPage() {
         <header className="ic-page-header">
           <h1 className="ic-page-title">{loadError}</h1>
         </header>
+      </section>
+    );
+  }
+
+  if (isRegistry) {
+    return (
+      <section className="ic-page">
+        <header className="ic-page-header">
+          <div className="ic-page-title-group">
+            <BackButton to={`/settings/tools/${id}`} />
+            <h1 className="ic-page-title">Edit Tool</h1>
+          </div>
+        </header>
+        <p className="ic-error-block" role="alert">
+          This tool is auto-synced from frontend code (source: registry). To edit it, modify the <code>defineClientTool</code> declaration in the codebase.
+        </p>
       </section>
     );
   }

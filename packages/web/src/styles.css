@@ -839,6 +839,15 @@ button {
   font-size: 13px;
 }
 
+.ic-info-block {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-dim);
+  color: var(--muted2);
+  font-size: 13px;
+}
+
 .ic-form {
   display: flex;
   flex-direction: column;
@@ -989,6 +998,16 @@ button {
 .ic-badge-green {
   background: var(--green-dim);
   color: var(--green);
+}
+
+.ic-badge-purple {
+  background: var(--purple-dim);
+  color: var(--purple);
+}
+
+.ic-badge-gray {
+  background: var(--border);
+  color: var(--muted2);
 }
 
 select.ic-input {

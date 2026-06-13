@@ -80,6 +80,7 @@ export function ToolDetailPage() {
   }
 
   const schema = tool.mcpSchema ?? [];
+  const isRegistry = tool.source === 'registry';
 
   return (
     <section className="ic-page">
@@ -93,6 +94,8 @@ export function ToolDetailPage() {
             type="button"
             className="ic-btn ic-btn-primary"
             onClick={() => navigate(`/settings/tools/${tool.id}/edit`)}
+            disabled={isRegistry}
+            title={isRegistry ? 'Registry tools are read-only; edit the code instead' : ''}
           >
             Edit
           </button>
@@ -100,11 +103,19 @@ export function ToolDetailPage() {
             type="button"
             className="ic-btn ic-btn-secondary"
             onClick={() => setDialogOpen(true)}
+            disabled={isRegistry}
+            title={isRegistry ? 'Registry tools cannot be deleted via UI' : ''}
           >
             - Delete
           </button>
         </div>
       </header>
+
+      {isRegistry && (
+        <p className="ic-info-block">
+          This tool is auto-synced from frontend code (source: registry). To edit or remove it, modify the <code>defineClientTool</code> declaration in the codebase.
+        </p>
+      )}
 
       <dl className="profile-grid">
         <dt>ID</dt>
@@ -119,6 +130,16 @@ export function ToolDetailPage() {
             }`}
           >
             {tool.kind === 'client' ? 'Client' : 'MCP'}
+          </span>
+        </dd>
+        <dt>Source</dt>
+        <dd>
+          <span
+            className={`ic-badge ${
+              isRegistry ? 'ic-badge-purple' : 'ic-badge-gray'
+            }`}
+          >
+            {isRegistry ? 'Registry' : 'Database'}
           </span>
         </dd>
         <dt>URL</dt>

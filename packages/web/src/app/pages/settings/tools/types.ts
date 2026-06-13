@@ -8,13 +8,21 @@ export interface McpToolSchema {
 // Tool execution location: 'mcp' (server-side) or 'client' (browser).
 export type ToolKind = 'mcp' | 'client';
 
+// How a tool row is managed:
+//   'database' — created/edited by an admin in the Tools UI (persisted truth)
+//   'registry' — auto-synced from a frontend defineClientTool declaration;
+//                truth lives in browser code, reconciled on /client-tools/sync
+export type ToolSource = 'database' | 'registry';
+
 // A Tool is a top-level resource. kind distinguishes MCP (server-side) tools
-// from Client (browser) tools.
+// from Client (browser) tools. source distinguishes admin-managed tools from
+// code-declared registry tools.
 export interface Tool {
   id: number;
   serverName: string;
   serverUrl: string;
   kind: ToolKind;
+  source: ToolSource;
   mcpSchema: McpToolSchema[] | null;
   // Number of agents currently referencing this tool (for delete warnings).
   agentCount: number;

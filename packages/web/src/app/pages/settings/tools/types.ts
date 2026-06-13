@@ -5,11 +5,16 @@ export interface McpToolSchema {
   parameters?: unknown | null;
 }
 
-// A Tool is a top-level resource representing one MCP server.
+// Tool execution location: 'mcp' (server-side) or 'client' (browser).
+export type ToolKind = 'mcp' | 'client';
+
+// A Tool is a top-level resource. kind distinguishes MCP (server-side) tools
+// from Client (browser) tools.
 export interface Tool {
   id: number;
   serverName: string;
   serverUrl: string;
+  kind: ToolKind;
   mcpSchema: McpToolSchema[] | null;
   // Number of agents currently referencing this tool (for delete warnings).
   agentCount: number;

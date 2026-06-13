@@ -143,8 +143,10 @@ export function AgentDetailPage() {
   // Test each associated Tool's reachability for the Status column.
   const checkServerStatus = useCallback(
     async (toolList: AgentTool[]) => {
+      // Client tools run in the browser; only probe MCP tools' servers.
+      const mcpTools = toolList.filter((t) => t.kind !== 'client');
       const entries = await Promise.all(
-        toolList.map(async (t) => {
+        mcpTools.map(async (t) => {
           try {
             const res = await apiFetch(`/tools/test`, {
               method: 'POST',
@@ -283,6 +285,7 @@ export function AgentDetailPage() {
               <tr>
                 <th className="ic-col-id">ID</th>
                 <th>Server Name</th>
+                <th>Type</th>
                 <th>URL</th>
                 <th>Tools</th>
                 <th className="ic-col-icon">Status</th>
@@ -292,7 +295,7 @@ export function AgentDetailPage() {
             <tbody>
               {tools.length === 0 ? (
                 <tr>
-                  <td className="ic-table-empty" colSpan={6}>
+                  <td className="ic-table-empty" colSpan={7}>
                     No tools associated.
                   </td>
                 </tr>
@@ -301,7 +304,18 @@ export function AgentDetailPage() {
                   <tr key={tool.id}>
                     <td className="ic-col-id">#{tool.id}</td>
                     <td>{tool.serverName}</td>
-                    <td className="ic-col-url">{tool.serverUrl}</td>
+                    <td>
+                      <span
+                        className={`ic-badge ${
+                          tool.kind === 'client'
+                            ? 'ic-badge-green'
+                            : 'ic-badge-blue'
+                        }`}
+                      >
+                        {tool.kind === 'client' ? 'Client' : 'MCP'}
+                      </span>
+                    </td>
+                    <td className="ic-col-url">{tool.serverUrl || '—'}</td>
                     <td>
                       <div className="ic-tag-list">
                         {(tool.mcpSchema ?? []).map((t, idx) => (
@@ -316,7 +330,14 @@ export function AgentDetailPage() {
                       </div>
                     </td>
                     <td className="ic-col-icon">
-                      {serverStatus[tool.id] === undefined ? (
+                      {tool.kind === 'client' ? (
+                        <span
+                          className="ic-field-hint"
+                          title="Browser tool — no server check"
+                        >
+                          N/A
+                        </span>
+                      ) : serverStatus[tool.id] === undefined ? (
                         <span className="ic-field-hint">…</span>
                       ) : serverStatus[tool.id] ? (
                         <FontAwesomeIcon

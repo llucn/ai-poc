@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ApiError, useApiFetch } from '../../../auth/use-api-fetch';
 import { BackButton } from '../../../components/back-button';
 import { isKebabCase } from '../../../share/kebab-case';
-import type { McpToolSchema, Tool } from './types';
+import type { McpToolSchema, Tool, ToolKind } from './types';
 
 export function EditToolPage() {
   const { id: idParam } = useParams<{ id: string }>();
@@ -15,9 +15,11 @@ export function EditToolPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const [kind, setKind] = useState<ToolKind>('mcp');
   const [serverName, setServerName] = useState('');
   const [serverUrl, setServerUrl] = useState('');
   const [originalUrl, setOriginalUrl] = useState('');
+  const [schemaText, setSchemaText] = useState('');
   const [tools, setTools] = useState<McpToolSchema[] | null>(null);
   // In edit mode the stored URL is already validated; a URL change requires a
   // fresh Test before saving.
@@ -39,10 +41,14 @@ export function EditToolPage() {
       .then((res) => res.json())
       .then((data: Tool) => {
         if (cancelled) return;
+        setKind(data.kind);
         setServerName(data.serverName);
         setServerUrl(data.serverUrl);
         setOriginalUrl(data.serverUrl);
         setTools(data.mcpSchema ?? null);
+        setSchemaText(
+          data.mcpSchema ? JSON.stringify(data.mcpSchema, null, 2) : ''
+        );
         setLoadError(null);
       })
       .catch((err) => {
@@ -63,6 +69,17 @@ export function EditToolPage() {
   const urlTrimmed = serverUrl.trim();
   const nameValid = nameTrimmed === '' || isKebabCase(nameTrimmed);
   const urlChanged = urlTrimmed !== originalUrl;
+  const isClient = kind === 'client';
+
+  const schemaTrimmed = schemaText.trim();
+  let schemaValid = true;
+  if (isClient && schemaTrimmed !== '') {
+    try {
+      schemaValid = Array.isArray(JSON.parse(schemaTrimmed));
+    } catch {
+      schemaValid = false;
+    }
+  }
 
   const onTest = async () => {
     if (!urlTrimmed) return;
@@ -87,15 +104,16 @@ export function EditToolPage() {
   };
 
   const busy = testing || saving;
-  // Saving is allowed when the name is valid and, if the URL changed, a fresh
-  // test has succeeded.
-  const saveDisabled =
-    !nameTrimmed ||
-    !nameValid ||
-    !urlTrimmed ||
-    busy ||
-    nameDup ||
-    (urlChanged && !tested);
+  // Client tools require valid schema JSON; MCP tools require a fresh Test when
+  // the URL changed.
+  const saveDisabled = isClient
+    ? !nameTrimmed || !nameValid || !schemaTrimmed || !schemaValid || busy || nameDup
+    : !nameTrimmed ||
+      !nameValid ||
+      !urlTrimmed ||
+      busy ||
+      nameDup ||
+      (urlChanged && !tested);
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -104,10 +122,16 @@ export function EditToolPage() {
     setError(null);
     setNameDup(false);
     try {
+      const body = isClient
+        ? {
+            serverName: nameTrimmed,
+            mcpSchema: JSON.parse(schemaTrimmed),
+          }
+        : { serverName: nameTrimmed, serverUrl: urlTrimmed };
       await apiFetch(`/tools/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serverName: nameTrimmed, serverUrl: urlTrimmed }),
+        body: JSON.stringify(body),
       });
       navigate(`/settings/tools/${id}`);
     } catch (err) {
@@ -151,6 +175,13 @@ export function EditToolPage() {
       </header>
       <form className="ic-form" onSubmit={onSubmit} noValidate>
         <div className="ic-field">
+          <label className="ic-field-label">Type</label>
+          <p className="ic-field-hint">
+            {isClient ? 'Client Tool (browser)' : 'MCP Tool (server-side)'}
+          </p>
+        </div>
+
+        <div className="ic-field">
           <label className="ic-field-label" htmlFor="t-name">
             Server Name *
           </label>
@@ -181,42 +212,70 @@ export function EditToolPage() {
           )}
         </div>
 
-        <div className="ic-field">
-          <label className="ic-field-label" htmlFor="t-url">
-            URL *
-          </label>
-          <div className="ic-input-group">
-            <input
-              id="t-url"
-              type="url"
-              className="ic-input"
-              value={serverUrl}
-              onChange={(e) => {
-                setServerUrl(e.target.value);
-                if (e.target.value.trim() !== originalUrl) setTested(false);
-                else setTested(true);
-              }}
+        {isClient ? (
+          <div className="ic-field">
+            <label className="ic-field-label" htmlFor="t-schema">
+              Schema (JSON) *
+            </label>
+            <textarea
+              id="t-schema"
+              className={`ic-input ic-textarea${
+                !schemaValid ? ' has-error' : ''
+              }`}
+              value={schemaText}
+              onChange={(e) => setSchemaText(e.target.value)}
               disabled={busy}
-              autoComplete="off"
-              placeholder="https://mcp.example.com"
+              rows={10}
             />
-            <button
-              type="button"
-              className="ic-btn ic-btn-secondary"
-              onClick={onTest}
-              disabled={!urlTrimmed || busy}
-            >
-              {testing ? 'Testing…' : 'Test'}
-            </button>
-          </div>
-          {urlChanged && !tested && (
             <p className="ic-field-hint">
-              URL changed — press Test before saving.
+              Client Tools run in the browser and require no server connectivity
+              test. Edit the JSON array of{' '}
+              {'{ name, description, parameters }'} objects.
             </p>
-          )}
-        </div>
+            {!schemaValid && (
+              <p className="ic-field-error" role="alert">
+                Schema must be a valid JSON array
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="ic-field">
+            <label className="ic-field-label" htmlFor="t-url">
+              URL *
+            </label>
+            <div className="ic-input-group">
+              <input
+                id="t-url"
+                type="url"
+                className="ic-input"
+                value={serverUrl}
+                onChange={(e) => {
+                  setServerUrl(e.target.value);
+                  if (e.target.value.trim() !== originalUrl) setTested(false);
+                  else setTested(true);
+                }}
+                disabled={busy}
+                autoComplete="off"
+                placeholder="https://mcp.example.com"
+              />
+              <button
+                type="button"
+                className="ic-btn ic-btn-secondary"
+                onClick={onTest}
+                disabled={!urlTrimmed || busy}
+              >
+                {testing ? 'Testing…' : 'Test'}
+              </button>
+            </div>
+            {urlChanged && !tested && (
+              <p className="ic-field-hint">
+                URL changed — press Test before saving.
+              </p>
+            )}
+          </div>
+        )}
 
-        {tools && (
+        {!isClient && tools && (
           <div className="ic-field">
             <label className="ic-field-label">Tools ({tools.length})</label>
             {tools.length === 0 ? (

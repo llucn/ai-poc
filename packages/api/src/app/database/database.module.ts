@@ -10,6 +10,7 @@ import { ToolEntity } from '../tool/tool.entity';
 import { SkillEntity } from '../skill/skill.entity';
 import { SessionEntity } from '../session/session.entity';
 import { MessageEntity } from '../session/message.entity';
+import { PendingClientCallEntity } from '../session/pending-client-call.entity';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { MessageEntity } from '../session/message.entity';
           SkillEntity,
           SessionEntity,
           MessageEntity,
+          PendingClientCallEntity,
         ],
         synchronize: false,
         logging: ['error', 'warn'],

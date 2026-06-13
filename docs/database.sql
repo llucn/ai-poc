@@ -48,22 +48,38 @@ CREATE TABLE IF NOT EXISTS t_agent (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table: t_tool
--- Top-level MCP server resource (one row per MCP server). Tools are shared
--- across agents through the t_agent_tool association table. server_name is
--- kebab-case and globally unique. mcp_schema stores the parsed registration
--- info as a JSON array of { name, description, parameters } objects fetched
--- from the server URL.
+-- Top-level tool resource. Tools are shared across agents through the
+-- t_agent_tool association table. server_name is kebab-case and globally
+-- unique. mcp_schema stores the tool definitions as a JSON array of
+-- { name, description, parameters } objects.
+--
+-- kind distinguishes execution location:
+--   'mcp'    — executed server-side via the MCP server at server_url
+--   'client' — executed in the browser; server_url is unused (empty) and the
+--              schema is entered manually (Phase 1, no auto-registration)
 CREATE TABLE IF NOT EXISTS t_tool (
   id INT AUTO_INCREMENT PRIMARY KEY,
   server_name VARCHAR(255) NOT NULL,
   server_url VARCHAR(2048) NOT NULL,
+  kind VARCHAR(16) NOT NULL,
   mcp_schema JSON NULL,
   created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_by VARCHAR(255) NOT NULL,
   updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   updated_by VARCHAR(255) NULL,
-  UNIQUE INDEX idx_tool_server_name (server_name)
+  UNIQUE INDEX idx_tool_server_name (server_name),
+  INDEX idx_tool_kind (kind)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Seed a demo Client Tool for end-to-end suspend/resume verification.
+-- Browser executes console.log(params.message) and returns a demo object.
+INSERT INTO t_tool (server_name, server_url, kind, mcp_schema, created_by) VALUES (
+  'console-log-echo',
+  '',
+  'client',
+  '[{"name":"console-log-echo","description":"Log a message to the browser console and return an echo object with a timestamp. Use this to demonstrate client-side tool execution.","parameters":{"type":"object","properties":{"message":{"type":"string","description":"The message to log to the browser console"}},"required":["message"]}}]',
+  'system'
+);
 
 -- Table: t_skill
 -- Top-level Skill resource. Skills are shared across agents through the
@@ -148,4 +164,33 @@ CREATE TABLE IF NOT EXISTS t_message (
   updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   updated_by VARCHAR(255) NULL,
   INDEX idx_message_session_id (session_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: t_pending_client_call
+-- A suspended Client Tool call awaiting browser execution. When the LLM loop
+-- emits an action whose tool name starts with `client__`, the server persists
+-- the suspended context here, pushes a `client_call` SSE event, and ends the
+-- request. The browser executes the tool and POSTs the result to
+-- /sessions/:id/client-result, which loads this row and resumes the loop.
+--
+-- call_id is a UUID used as the idempotency key on resume.
+-- message_context stores the LLM messages array captured at suspend time.
+-- status: 'pending' | 'completed' | 'failed' | 'timeout'.
+CREATE TABLE IF NOT EXISTS t_pending_client_call (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  call_id VARCHAR(255) NOT NULL,
+  session_id INT NOT NULL,
+  agent_id INT NOT NULL,
+  tool_id INT NOT NULL,
+  tool_name VARCHAR(255) NOT NULL,
+  params JSON NULL,
+  message_context JSON NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'pending',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by VARCHAR(255) NOT NULL,
+  updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  updated_by VARCHAR(255) NULL,
+  UNIQUE INDEX idx_pending_call_id (call_id),
+  INDEX idx_pending_session_id (session_id),
+  INDEX idx_pending_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

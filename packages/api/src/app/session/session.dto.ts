@@ -11,3 +11,11 @@ export interface CreateMessageDto {
 export interface DeleteSessionsDto {
   ids: number[];
 }
+
+// Browser-side Client Tool result, POSTed to /sessions/:id/client-result to
+// resume a suspended turn. Exactly one of result / error is set.
+export interface ClientResultDto {
+  callId: string;
+  result?: unknown;
+  error?: string;
+}

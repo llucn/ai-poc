@@ -6,13 +6,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApiFetch } from '../../auth/use-api-fetch';
 import { useUser } from '../../contexts/UserContext';
+import { executeClientTool } from './client-tool-executor';
 import { ThoughtMessage } from './thought-message';
 import type { Message, Session } from './types';
 
 const THINKING_ID = -1;
-// Temp id for the user's own bubble shown immediately on send. The real
+// Optimistic user bubbles use unique negative ids starting at -2, decrementing
+// per send. The server never echoes the user message back over SSE, so these
+// bubbles persist for the session's lifetime; a fixed id would collide (two
+// React children with the same key) once a second message is sent. The real
 // persisted user message is loaded next time the session is reopened.
-const PENDING_USER_ID = -2;
+const FIRST_PENDING_USER_ID = -2;
 
 export function ChatPage() {
   const { id: idParam } = useParams<{ id: string }>();
@@ -28,8 +32,16 @@ export function ChatPage() {
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(!isNew);
   const [error, setError] = useState<string | null>(null);
+  // Name of the Client Tool currently executing in the browser, or null.
+  // Shown as a status indicator while the agent loop is suspended.
+  const [pendingClientTool, setPendingClientTool] = useState<string | null>(
+    null
+  );
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Next id to assign to an optimistic user bubble; decrements per send so each
+  // bubble has a unique (negative) React key.
+  const nextPendingUserIdRef = useRef(FIRST_PENDING_USER_ID);
   // Set right before navigating to /chat/{id} for a session we just created
   // in-memory. It tells the load effect to skip the clear+refetch for that one
   // navigation, so the messages already on screen (the optimistic user bubble
@@ -87,10 +99,15 @@ export function ChatPage() {
   // Append the user's bubble + a "Thinking..." placeholder, then open the SSE
   // stream for one assistant turn. Used identically for the first message of a
   // new session and for every subsequent message.
+  //
+  // The turn may suspend on a Client Tool: the server pushes a `client_call`
+  // event and ends the stream. We execute the tool in the browser, POST the
+  // result to /client-result (which streams the continuation), and keep
+  // consuming until the turn ends without suspending.
   const streamMessage = useCallback(
     async (sid: number, content: string) => {
       const pendingUserMsg: Message = {
-        id: PENDING_USER_ID,
+        id: nextPendingUserIdRef.current--,
         sessionId: sid,
         userName: user?.username || '',
         messageType: 1,
@@ -111,7 +128,6 @@ export function ChatPage() {
       };
       setMessages((prev) => [...prev, pendingUserMsg, thinkingMsg]);
 
-      const url = `/api/sessions/${sid}/messages`;
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
@@ -122,41 +138,75 @@ export function ChatPage() {
         }
       }
 
-      await fetchEventSource(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ content }),
-        onmessage(ev) {
-          if (ev.event === 'thought_created' || ev.event === 'message_created') {
-            try {
-              const msg: Message = JSON.parse(ev.data);
-              setMessages((prev) =>
-                prev.filter((m) => m.id !== THINKING_ID).concat(msg)
-              );
-            } catch {
-              // ignore parse errors
+      // Consume one SSE stream. Resolves with the pending client_call (if the
+      // turn suspended) or null (if it ended normally / errored).
+      type ClientCall = { callId: string; toolName: string; params: unknown };
+      const consume = (url: string, body: string): Promise<ClientCall | null> => {
+        let clientCall: ClientCall | null = null;
+        return fetchEventSource(url, {
+          method: 'POST',
+          headers,
+          body,
+          onmessage(ev) {
+            if (
+              ev.event === 'thought_created' ||
+              ev.event === 'message_created'
+            ) {
+              try {
+                const msg: Message = JSON.parse(ev.data);
+                setMessages((prev) =>
+                  prev.filter((m) => m.id !== THINKING_ID).concat(msg)
+                );
+              } catch {
+                // ignore parse errors
+              }
+            } else if (ev.event === 'client_call') {
+              try {
+                clientCall = JSON.parse(ev.data) as ClientCall;
+              } catch {
+                setError('Malformed client_call event');
+              }
+            } else if (ev.event === 'error') {
+              try {
+                const errData = JSON.parse(ev.data);
+                setError(errData.message || 'LLM call failed');
+              } catch {
+                setError('LLM call failed');
+              }
+              removeThinker();
             }
-          } else if (ev.event === 'error') {
-            try {
-              const errData = JSON.parse(ev.data);
-              setError(errData.message || 'LLM call failed');
-            } catch {
-              setError('LLM call failed');
-            }
+            // `done` (duplicate resume) carries no payload; just let it close.
+          },
+          onerror(err) {
+            setError(err instanceof Error ? err.message : 'Connection failed');
             removeThinker();
-          }
-        },
-        onerror(err) {
-          setError(err instanceof Error ? err.message : 'Connection failed');
-          removeThinker();
-          throw err; // stop retries
-        },
-        onclose() {
-          removeThinker();
-        },
-      });
+            throw err; // stop retries
+          },
+        }).then(() => clientCall);
+      };
 
-      // fetchEventSource resolves when the stream ends
+      // Drive the turn, resuming across each Client Tool suspension.
+      let clientCall = await consume(
+        `/api/sessions/${sid}/messages`,
+        JSON.stringify({ content })
+      );
+      while (clientCall) {
+        const { callId, toolName, params } = clientCall;
+        setPendingClientTool(toolName);
+        // Execute the tool in the browser; never throws (errors are captured).
+        const outcome = await executeClientTool(toolName, params);
+        setPendingClientTool(null);
+        // Show a fresh "Thinking..." placeholder while the loop resumes.
+        setMessages((prev) =>
+          prev.filter((m) => m.id !== THINKING_ID).concat(thinkingMsg)
+        );
+        clientCall = await consume(
+          `/api/sessions/${sid}/client-result`,
+          JSON.stringify({ callId, ...outcome })
+        );
+      }
+
+      // Stream(s) ended without suspending.
       removeThinker();
     },
     [user]
@@ -289,6 +339,13 @@ export function ChatPage() {
 
         <div ref={messagesEndRef} />
       </div>
+
+      {pendingClientTool && (
+        <p className="chat-client-tool-status" role="status">
+          <span className="chat-thinking-spinner" />
+          <span>Executing client tool: {pendingClientTool}…</span>
+        </p>
+      )}
 
       {error && (
         <p className="ic-error-block chat-error" role="alert">

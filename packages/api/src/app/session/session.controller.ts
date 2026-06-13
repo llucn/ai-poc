@@ -17,6 +17,7 @@ import type {
   CreateSessionDto,
   CreateMessageDto,
   DeleteSessionsDto,
+  ClientResultDto,
 } from './session.dto';
 
 @Controller('sessions')
@@ -83,5 +84,29 @@ export class SessionController {
     const userName = user?.userName || user?.username || '';
     const createdBy = userName || 'system';
     await this.sessionService.createMessage(id, dto, userName, createdBy, res);
+  }
+
+  @Post(':id/client-result')
+  async clientResult(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ClientResultDto,
+    @CurrentUser() user: any,
+    @Res() res: Response
+  ) {
+    // SSE: the resumed turn streams its continuation (thoughts, final answer,
+    // or another client_call) back over this response.
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const userName = user?.userName || user?.username || '';
+    const createdBy = userName || 'system';
+    await this.sessionService.resumeClientResult(
+      id,
+      dto,
+      userName,
+      createdBy,
+      res
+    );
   }
 }

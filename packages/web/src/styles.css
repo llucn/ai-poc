@@ -971,6 +971,26 @@ button {
   color: var(--muted);
 }
 
+/* Small inline badge for categorical labels (e.g. Tool type MCP / Client). */
+.ic-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.ic-badge-blue {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.ic-badge-green {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
 select.ic-input {
   cursor: pointer;
   appearance: none;
@@ -1493,6 +1513,16 @@ textarea.ic-input {
   margin: 0 12px;
   padding: 12px;
   border-radius: 8px;
+}
+
+.chat-client-tool-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px;
+  padding: 8px 4px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .chat-input-bar {

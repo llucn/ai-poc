@@ -111,8 +111,18 @@ export function ToolDetailPage() {
         <dd>#{tool.id}</dd>
         <dt>Server Name</dt>
         <dd>{tool.serverName}</dd>
+        <dt>Type</dt>
+        <dd>
+          <span
+            className={`ic-badge ${
+              tool.kind === 'client' ? 'ic-badge-green' : 'ic-badge-blue'
+            }`}
+          >
+            {tool.kind === 'client' ? 'Client' : 'MCP'}
+          </span>
+        </dd>
         <dt>URL</dt>
-        <dd>{tool.serverUrl}</dd>
+        <dd>{tool.kind === 'client' ? 'N/A (browser tool)' : tool.serverUrl}</dd>
         <dt>Used By</dt>
         <dd>{tool.agentCount} agent(s)</dd>
       </dl>

@@ -1,6 +1,12 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { useEffect } from 'react';
 import { RequireAuth } from './auth/require-auth';
 import { RequireRole } from './auth/require-role';
+import { useApiFetch } from './auth/use-api-fetch';
+import { useUser } from './contexts/UserContext';
+import { getAllClientTools } from './pages/chat/client-tool-executor';
+// Register all client tool definitions (defineClientTool side effects) at startup.
+import './pages/chat/tools';
 import { DemoPage } from './pages/demo-page';
 import { LoginPage } from './pages/login/login-page';
 import { ProfilePage } from './pages/profile-page';
@@ -25,6 +31,34 @@ import { ChatPage } from './pages/chat/chat-page';
 import { AppShell } from './shell/app-shell';
 
 export function App() {
+  const apiFetch = useApiFetch();
+  const user = useUser();
+
+  // Sync the defineClientTool registry to the backend once the user is logged
+  // in. The endpoint requires user credentials (X-User-Name header), so calling
+  // it before login yields 401; gating on `user` avoids that and re-runs the
+  // sync right after login. Errors are caught and logged; sync failure does not
+  // block the app.
+  useEffect(() => {
+    if (!user) return;
+    const syncRegistry = async () => {
+      try {
+        const tools = getAllClientTools();
+        await apiFetch('/client-tools/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tools }),
+        });
+        // eslint-disable-next-line no-console
+        console.log(`[ClientTools] Synced ${tools.length} tool(s) to backend`);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[ClientTools] Sync failed:', err);
+      }
+    };
+    syncRegistry();
+  }, [apiFetch, user]);
+
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />

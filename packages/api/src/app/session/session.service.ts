@@ -1,8 +1,13 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, In } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { SessionEntity } from './session.entity';
 import { MessageEntity } from './message.entity';
+import {
+  PendingClientCallEntity,
+  type LlmMessage,
+} from './pending-client-call.entity';
 import { AgentEntity } from '../agent/agent.entity';
 import { AgentToolEntity } from '../agent/agent-tool.entity';
 import { AgentSkillEntity } from '../agent/agent-skill.entity';
@@ -11,7 +16,11 @@ import { SkillEntity } from '../skill/skill.entity';
 import { LlmService } from '../llm/llm.service';
 import { McpClientService } from '../mcp/mcp-client.service';
 import { SYSTEM_PROMPT } from '../agent/system-prompt';
-import type { CreateSessionDto, CreateMessageDto } from './session.dto';
+import type {
+  CreateSessionDto,
+  CreateMessageDto,
+  ClientResultDto,
+} from './session.dto';
 import type { Response } from 'express';
 
 const ASSISTANT_USER = 'ASSISTANT';
@@ -100,27 +109,27 @@ export function parseAssistantReply(llmOutput: string): ParsedReply {
 }
 
 /**
- * Parse a tool name in the format `mcp__${toolId}__${toolName}`.
- *
- * `toolId` is the t_tool.id (the top-level Tool resource), so the same tool
- * has a stable name across every agent that references it. The tool name
- * itself may contain underscores, so we split on the first two `__`
+ * Parse a tool name in the format `<prefix>__<toolId>__<toolName>` where prefix
+ * is `mcp` (server-side) or `client` (browser). `toolId` is the t_tool.id, so
+ * the same tool has a stable name across every agent that references it. The
+ * tool name itself may contain underscores, so we split on the first two `__`
  * delimiters only. Returns null if the format doesn't match.
  *
  * Examples:
- *   "mcp__5__getWeatherForecastByLocation" → { toolId: 5, toolName: "getWeatherForecastByLocation" }
- *   "mcp__12__get_user_profile"             → { toolId: 12, toolName: "get_user_profile" }
+ *   "mcp__5__getWeatherForecastByLocation" → { prefix: "mcp", toolId: 5, toolName: "getWeatherForecastByLocation" }
+ *   "client__1__console-log-echo"           → { prefix: "client", toolId: 1, toolName: "console-log-echo" }
  *   "invalid_format"                         → null
  */
 export function parseToolName(
   tool: string
-): { toolId: number; toolName: string } | null {
-  const match = /^mcp__(\d+)__(.+)$/.exec(tool);
+): { prefix: 'mcp' | 'client'; toolId: number; toolName: string } | null {
+  const match = /^(mcp|client)__(\d+)__(.+)$/.exec(tool);
   if (!match) return null;
-  const toolId = Number(match[1]);
-  const toolName = match[2];
+  const prefix = match[1] as 'mcp' | 'client';
+  const toolId = Number(match[2]);
+  const toolName = match[3];
   if (!Number.isFinite(toolId) || toolName.length === 0) return null;
-  return { toolId, toolName };
+  return { prefix, toolId, toolName };
 }
 
 /**
@@ -159,6 +168,8 @@ export class SessionService {
     private readonly toolRepository: Repository<ToolEntity>,
     @InjectRepository(SkillEntity)
     private readonly skillRepository: Repository<SkillEntity>,
+    @InjectRepository(PendingClientCallEntity)
+    private readonly pendingClientCallRepository: Repository<PendingClientCallEntity>,
     private readonly dataSource: DataSource,
     private readonly llmService: LlmService,
     private readonly mcpClientService: McpClientService
@@ -282,6 +293,129 @@ export class SessionService {
   }
 
   /**
+   * Resume a suspended turn after the browser executed a Client Tool and POSTed
+   * the result. Loads the pending call, validates it, appends the result as an
+   * observation Thought, marks the pending row completed, and re-enters the
+   * agent loop — streaming the continuation over a fresh SSE response.
+   *
+   * Idempotent: a callId whose row is already non-'pending' is treated as a
+   * duplicate (sends a `done` event and returns without resuming).
+   */
+  async resumeClientResult(
+    sessionId: number,
+    dto: ClientResultDto,
+    userName: string,
+    createdBy: string,
+    res: Response
+  ): Promise<void> {
+    res.write(': connection established\n\n');
+
+    try {
+      // Verify session belongs to user.
+      const session = await this.sessionRepository.findOne({
+        where: { id: sessionId, userName },
+      });
+      if (!session) {
+        throw new NotFoundException(`Session with id ${sessionId} not found`);
+      }
+
+      const pending = await this.pendingClientCallRepository.findOne({
+        where: { callId: dto.callId },
+      });
+      if (!pending) {
+        throw new NotFoundException(
+          `Pending client call ${dto.callId} not found`
+        );
+      }
+      if (pending.sessionId !== sessionId) {
+        throw new NotFoundException(
+          `Pending client call ${dto.callId} does not belong to session ${sessionId}`
+        );
+      }
+
+      // Idempotency: already resumed → ignore duplicate result POST.
+      if (pending.status !== 'pending') {
+        this.logger.warn(
+          `Duplicate client-result for callId=${dto.callId} (status=${pending.status}); ignoring`
+        );
+        res.write(`event: done\n`);
+        res.write(`data: ${JSON.stringify({ duplicate: true })}\n\n`);
+        return;
+      }
+
+      const agent = await this.agentRepository.findOne({
+        where: { id: pending.agentId },
+      });
+      if (!agent) {
+        throw new NotFoundException(
+          `Agent with id ${pending.agentId} not found for session ${sessionId}`
+        );
+      }
+
+      // Build the observation from the client's result (or error), in the same
+      // shape MCP observations use so the LLM sees a consistent format.
+      const observationContent =
+        dto.error !== undefined && dto.error !== null
+          ? buildErrorObservationContent(dto.error)
+          : buildObservationContent(dto.result ?? null);
+
+      // Persist the observation as a Thought and push it.
+      const now = new Date();
+      const observationMessage = this.messageRepository.create({
+        sessionId,
+        userName: ASSISTANT_USER,
+        messageType: 1,
+        isThought: 1,
+        content: observationContent,
+        createdOn: now,
+        createdBy: `assistant/${createdBy}`,
+      });
+      const savedObservationMsg = await this.messageRepository.save(
+        observationMessage
+      );
+      res.write(`event: thought_created\n`);
+      res.write(`data: ${JSON.stringify(savedObservationMsg)}\n\n`);
+
+      // Restore the suspended LLM context and append the observation.
+      const llmMessages: LlmMessage[] = [
+        ...pending.messageContext,
+        { role: 'assistant', content: observationContent },
+      ];
+
+      // Mark the pending call resolved before continuing (idempotency guard).
+      pending.status = 'completed';
+      pending.updatedOn = now;
+      pending.updatedBy = createdBy;
+      await this.pendingClientCallRepository.save(pending);
+
+      // Count prior tool rounds from the restored context so the cap carries
+      // across suspend/resume. Each round adds one assistant action turn plus
+      // one assistant observation turn after the initial assistant action.
+      const priorAssistantTurns = pending.messageContext.filter(
+        (m) => m.role === 'assistant'
+      ).length;
+      const startToolCallCount = Math.floor(priorAssistantTurns / 2);
+
+      await this.runLoop(
+        session,
+        agent,
+        llmMessages,
+        createdBy,
+        res,
+        startToolCallCount
+      );
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : 'Unknown error occurred';
+      this.logger.error(`resumeClientResult SSE error: ${errorMessage}`);
+      res.write(`event: error\n`);
+      res.write(`data: ${JSON.stringify({ message: errorMessage })}\n\n`);
+    } finally {
+      res.end();
+    }
+  }
+
+  /**
    * Run a full multi-turn assistant turn for a session: persist the user message,
    * then loop until the LLM produces a `final_answer`, executing MCP tools each
    * time the LLM emits an `action`. Streams every intermediate state (LLM thoughts
@@ -310,7 +444,6 @@ export class SessionService {
   ): Promise<void> {
     const sessionId = session.id;
     const now = new Date();
-    let timestampOffset = 1;
 
     // Send an initial SSE comment immediately to establish the connection and
     // prevent browser timeout during the first LLM call.
@@ -371,10 +504,7 @@ export class SessionService {
     history.reverse();
 
     const systemContent = await this.buildSystemContent(agent);
-    const llmMessages: {
-      role: 'system' | 'user' | 'assistant';
-      content: string;
-    }[] = [
+    const llmMessages: LlmMessage[] = [
       { role: 'system', content: systemContent },
       ...history.map((msg) => ({
         role: (msg.userName === ASSISTANT_USER ? 'assistant' : 'user') as
@@ -384,11 +514,43 @@ export class SessionService {
       })),
     ];
 
-    let toolCallCount = 0;
+    // Run the (re-entrant) agent loop. It runs until final_answer/error, the
+    // tool-call cap, or a Client Tool suspends it (returns early after pushing
+    // a `client_call` event).
+    await this.runLoop(session, agent, llmMessages, createdBy, res, 0);
+  }
 
-    // Tool calling loop: run until final_answer, error, or tool call limit.
+  /**
+   * The re-entrant agent loop: read context → call LLM → dispatch. Shared by
+   * the initial turn (`runLlmTurn`) and the resume path (`resumeClientResult`),
+   * so it must not assume whether it was first-started or resumed.
+   *
+   * Each iteration:
+   *   1. Call LLM, save raw output as a Thought message, push `thought_created`.
+   *   2. Parse output:
+   *        - `final_answer` / `error` → save assistant reply, push
+   *          `message_created`, finalize session, return.
+   *        - `action` (mcp)  → execute MCP tool inline, save observation as a
+   *          Thought, push `thought_created`, continue.
+   *        - `action` (client) → suspend: persist t_pending_client_call, push
+   *          `client_call`, finalize session, return (browser resumes later).
+   *   3. Hard-cap at MAX_TOOL_CALLS to prevent runaway loops.
+   */
+  private async runLoop(
+    session: SessionEntity,
+    agent: AgentEntity,
+    llmMessages: LlmMessage[],
+    createdBy: string,
+    res: Response,
+    startToolCallCount: number
+  ): Promise<void> {
+    const sessionId = session.id;
+    const now = new Date();
+    let timestampOffset = 1;
+    let toolCallCount = startToolCallCount;
+
     while (true) {
-      // Send a keep-alive comment before each LLM call to prevent connection timeout.
+      // Keep-alive comment before each LLM call to prevent connection timeout.
       res.write(': processing\n\n');
 
       // Step 1: call LLM
@@ -415,8 +577,7 @@ export class SessionService {
       // Step 3: parse and dispatch
       const parsed = parseAssistantReply(llmOutput);
 
-      if (parsed.type === 'final_answer') {
-        // Save assistant reply, push `message_created`, exit loop.
+      if (parsed.type === 'final_answer' || parsed.type === 'error') {
         const assistantMessage = this.messageRepository.create({
           sessionId,
           userName: ASSISTANT_USER,
@@ -431,27 +592,8 @@ export class SessionService {
         );
         res.write(`event: message_created\n`);
         res.write(`data: ${JSON.stringify(savedAssistantMsg)}\n\n`);
-        break;
-      }
-
-      if (parsed.type === 'error') {
-        // LLM output was malformed: save error as the assistant reply so the
-        // user sees what went wrong, push it, and exit.
-        const assistantMessage = this.messageRepository.create({
-          sessionId,
-          userName: ASSISTANT_USER,
-          messageType: 1,
-          isThought: 0,
-          content: parsed.content,
-          createdOn: new Date(now.getTime() + timestampOffset++),
-          createdBy: `assistant/${createdBy}`,
-        });
-        const savedAssistantMsg = await this.messageRepository.save(
-          assistantMessage
-        );
-        res.write(`event: message_created\n`);
-        res.write(`data: ${JSON.stringify(savedAssistantMsg)}\n\n`);
-        break;
+        await this.finalizeSession(session, createdBy);
+        return;
       }
 
       // parsed.type === 'action': enforce the tool-call cap before executing.
@@ -465,17 +607,33 @@ export class SessionService {
             message: `Tool call limit exceeded (max ${MAX_TOOL_CALLS} calls per message)`,
           })}\n\n`
         );
-        break;
+        await this.finalizeSession(session, createdBy);
+        return;
       }
 
       // Append the LLM's action thought to the LLM-side history so the next
-      // turn sees what action the model just decided.
+      // turn (or the resumed loop) sees what action the model just decided.
       llmMessages.push({ role: 'assistant', content: llmOutput });
 
-      // Step 4: execute the MCP tool and produce an observation.
+      // Route by tool kind. Client tools suspend the loop; MCP tools run inline.
+      const classified = parseToolName(parsed.actionData.tool);
+      if (classified && classified.prefix === 'client') {
+        await this.suspendForClientTool(
+          session,
+          agent,
+          llmMessages,
+          parsed.actionData,
+          classified.toolId,
+          classified.toolName,
+          createdBy,
+          res
+        );
+        return; // suspended — browser will POST the result to resume
+      }
+
+      // MCP tool (or invalid name): execute server-side and produce observation.
       const observationContent = await this.executeTool(parsed.actionData);
 
-      // Persist the observation as a Thought message and push it.
       const observationMessage = this.messageRepository.create({
         sessionId,
         userName: ASSISTANT_USER,
@@ -491,16 +649,66 @@ export class SessionService {
       res.write(`event: thought_created\n`);
       res.write(`data: ${JSON.stringify(savedObservationMsg)}\n\n`);
 
-      // Append the observation to the LLM history (as an assistant turn) and
-      // continue the loop.
       llmMessages.push({ role: 'assistant', content: observationContent });
       toolCallCount++;
     }
+  }
 
-    // Update session last_activity_time once the turn completes.
+  /**
+   * Suspend the loop for a Client Tool call: persist the suspended LLM context
+   * to t_pending_client_call, push a `client_call` SSE event for the browser to
+   * execute, and finalize the session. The loop resumes via resumeClientResult
+   * once the browser POSTs the result.
+   */
+  private async suspendForClientTool(
+    session: SessionEntity,
+    agent: AgentEntity,
+    llmMessages: LlmMessage[],
+    actionData: { tool: string; params: unknown },
+    toolId: number,
+    toolName: string,
+    createdBy: string,
+    res: Response
+  ): Promise<void> {
+    const callId = randomUUID();
+    const pending = this.pendingClientCallRepository.create({
+      callId,
+      sessionId: session.id,
+      agentId: agent.id,
+      toolId,
+      toolName,
+      params: actionData.params ?? {},
+      messageContext: llmMessages,
+      status: 'pending',
+      createdOn: new Date(),
+      createdBy,
+    });
+    await this.pendingClientCallRepository.save(pending);
+
+    this.logger.log(
+      `Suspending session ${session.id} for client tool ${toolName} (callId=${callId})`
+    );
+    res.write(`event: client_call\n`);
+    res.write(
+      `data: ${JSON.stringify({
+        callId,
+        toolName,
+        params: actionData.params ?? {},
+      })}\n\n`
+    );
+
+    await this.finalizeSession(session, createdBy);
+  }
+
+  /** Update a session's last activity timestamp after a turn or suspension. */
+  private async finalizeSession(
+    session: SessionEntity,
+    updatedBy: string
+  ): Promise<void> {
+    const now = new Date();
     session.lastActivityTime = now;
     session.updatedOn = now;
-    session.updatedBy = createdBy;
+    session.updatedBy = updatedBy;
     await this.sessionRepository.save(session);
   }
 
@@ -531,7 +739,9 @@ export class SessionService {
   /**
    * Resolve the flattened tool list for an agent: join t_agent_tool + t_tool,
    * then expand each Tool's mcp_schema. Each tool name is prefixed with the
-   * t_tool.id so it is globally stable: `mcp__<toolId>__<actualToolName>`.
+   * tool kind and t_tool.id so it is globally stable and routable:
+   * `mcp__<toolId>__<actualToolName>` (server-side) or
+   * `client__<toolId>__<actualToolName>` (browser).
    */
   private async getAvailableTools(agentId: number): Promise<
     { name: string; description: string | null; parameters: unknown }[]
@@ -555,9 +765,10 @@ export class SessionService {
     for (const link of links) {
       const tool = byId.get(link.toolId);
       if (!tool || !tool.mcpSchema) continue;
+      const prefix = tool.kind === 'client' ? 'client' : 'mcp';
       for (const schema of tool.mcpSchema) {
         result.push({
-          name: `mcp__${tool.id}__${schema.name}`,
+          name: `${prefix}__${tool.id}__${schema.name}`,
           description: schema.description ?? null,
           parameters: schema.parameters ?? null,
         });

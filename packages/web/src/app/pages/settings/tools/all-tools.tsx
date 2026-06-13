@@ -49,11 +49,13 @@ export function AllToolsPage() {
     loadTools(page);
   }, [loadTools, page]);
 
-  // Probe each tool's MCP server reachability for the Status column.
+  // Probe each MCP tool's server reachability for the Status column. Client
+  // tools run in the browser and have no server to probe (shown as N/A).
   const checkOnlineStatus = useCallback(
     async (toolList: Tool[]) => {
+      const mcpTools = toolList.filter((t) => t.kind !== 'client');
       const entries = await Promise.all(
-        toolList.map(async (t) => {
+        mcpTools.map(async (t) => {
           try {
             const res = await apiFetch('/tools/test', {
               method: 'POST',
@@ -130,7 +132,7 @@ export function AllToolsPage() {
     if (loading) {
       return (
         <tr>
-          <td className="ic-table-empty" colSpan={6}>
+          <td className="ic-table-empty" colSpan={8}>
             Loading…
           </td>
         </tr>
@@ -139,7 +141,7 @@ export function AllToolsPage() {
     if (error) {
       return (
         <tr>
-          <td className="ic-table-empty" colSpan={6} role="alert">
+          <td className="ic-table-empty" colSpan={8} role="alert">
             {error}
           </td>
         </tr>
@@ -148,30 +150,56 @@ export function AllToolsPage() {
     if (tools.length === 0) {
       return (
         <tr>
-          <td className="ic-table-empty" colSpan={6}>
+          <td className="ic-table-empty" colSpan={8}>
             No tools yet.
           </td>
         </tr>
       );
     }
-    return tools.map((tool) => (
-      <tr key={tool.id}>
-        <td className="ic-col-check">
-          <input
-            type="checkbox"
-            aria-label={`Select tool ${tool.serverName}`}
-            checked={selected.has(tool.id)}
-            onChange={() => toggleRow(tool.id)}
-          />
-        </td>
-        <td className="ic-col-id">#{tool.id}</td>
-        <td>
-          <Link to={`/settings/tools/${tool.id}`}>{tool.serverName}</Link>
-        </td>
-        <td className="ic-col-url">{tool.serverUrl}</td>
+    return tools.map((tool) => {
+      const isRegistry = tool.source === 'registry';
+      return (
+        <tr key={tool.id}>
+          <td className="ic-col-check">
+            <input
+              type="checkbox"
+              aria-label={`Select tool ${tool.serverName}`}
+              checked={selected.has(tool.id)}
+              onChange={() => toggleRow(tool.id)}
+              disabled={isRegistry}
+              title={isRegistry ? 'Registry tools cannot be deleted via UI' : ''}
+            />
+          </td>
+          <td className="ic-col-id">#{tool.id}</td>
+          <td>
+            <Link to={`/settings/tools/${tool.id}`}>{tool.serverName}</Link>
+          </td>
+          <td>
+            <span
+              className={`ic-badge ${
+                tool.kind === 'client' ? 'ic-badge-green' : 'ic-badge-blue'
+              }`}
+            >
+              {tool.kind === 'client' ? 'Client' : 'MCP'}
+            </span>
+          </td>
+          <td>
+            <span
+              className={`ic-badge ${
+                isRegistry ? 'ic-badge-purple' : 'ic-badge-gray'
+              }`}
+            >
+              {isRegistry ? 'Registry' : 'Database'}
+            </span>
+          </td>
+        <td className="ic-col-url">{tool.serverUrl || '—'}</td>
         <td>{tool.mcpSchema?.length ?? 0}</td>
         <td className="ic-col-icon">
-          {onlineStatus[tool.id] === undefined ? (
+          {tool.kind === 'client' ? (
+            <span className="ic-field-hint" title="Browser tool — no server check">
+              N/A
+            </span>
+          ) : onlineStatus[tool.id] === undefined ? (
             <span className="ic-field-hint">…</span>
           ) : onlineStatus[tool.id] ? (
             <FontAwesomeIcon
@@ -188,7 +216,8 @@ export function AllToolsPage() {
           )}
         </td>
       </tr>
-    ));
+    );
+    });
   }, [tools, selected, loading, error, toggleRow, onlineStatus]);
 
   return (
@@ -235,6 +264,8 @@ export function AllToolsPage() {
               </th>
               <th className="ic-col-id">ID</th>
               <th>Name</th>
+              <th>Type</th>
+              <th>Source</th>
               <th>URL</th>
               <th>Tools</th>
               <th className="ic-col-icon">Status</th>

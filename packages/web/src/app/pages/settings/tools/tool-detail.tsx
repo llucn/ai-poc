@@ -80,6 +80,7 @@ export function ToolDetailPage() {
   }
 
   const schema = tool.mcpSchema ?? [];
+  const isRegistry = tool.source === 'registry';
 
   return (
     <section className="ic-page">
@@ -93,6 +94,8 @@ export function ToolDetailPage() {
             type="button"
             className="ic-btn ic-btn-primary"
             onClick={() => navigate(`/settings/tools/${tool.id}/edit`)}
+            disabled={isRegistry}
+            title={isRegistry ? 'Registry tools are read-only; edit the code instead' : ''}
           >
             Edit
           </button>
@@ -100,19 +103,47 @@ export function ToolDetailPage() {
             type="button"
             className="ic-btn ic-btn-secondary"
             onClick={() => setDialogOpen(true)}
+            disabled={isRegistry}
+            title={isRegistry ? 'Registry tools cannot be deleted via UI' : ''}
           >
             - Delete
           </button>
         </div>
       </header>
 
+      {isRegistry && (
+        <p className="ic-info-block">
+          This tool is auto-synced from frontend code (source: registry). To edit or remove it, modify the <code>defineClientTool</code> declaration in the codebase.
+        </p>
+      )}
+
       <dl className="profile-grid">
         <dt>ID</dt>
         <dd>#{tool.id}</dd>
         <dt>Server Name</dt>
         <dd>{tool.serverName}</dd>
+        <dt>Type</dt>
+        <dd>
+          <span
+            className={`ic-badge ${
+              tool.kind === 'client' ? 'ic-badge-green' : 'ic-badge-blue'
+            }`}
+          >
+            {tool.kind === 'client' ? 'Client' : 'MCP'}
+          </span>
+        </dd>
+        <dt>Source</dt>
+        <dd>
+          <span
+            className={`ic-badge ${
+              isRegistry ? 'ic-badge-purple' : 'ic-badge-gray'
+            }`}
+          >
+            {isRegistry ? 'Registry' : 'Database'}
+          </span>
+        </dd>
         <dt>URL</dt>
-        <dd>{tool.serverUrl}</dd>
+        <dd>{tool.kind === 'client' ? 'N/A (browser tool)' : tool.serverUrl}</dd>
         <dt>Used By</dt>
         <dd>{tool.agentCount} agent(s)</dd>
       </dl>

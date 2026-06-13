@@ -89,6 +89,12 @@ export class ToolService {
 
   /** Test an MCP server URL without persisting; returns the parsed tools. */
   async testServer(serverUrl: string): Promise<{ tools: McpToolSchema[] }> {
+    if (!serverUrl || serverUrl.trim().length === 0) {
+      // Client Tools have no server URL and require no connectivity test.
+      throw new BadRequestException(
+        'Test endpoint is not applicable to Client Tools'
+      );
+    }
     const tools = await this.fetchMcpSchema(serverUrl);
     return { tools };
   }
@@ -116,11 +122,29 @@ export class ToolService {
 
   async create(dto: CreateToolDto, createdBy: string): Promise<ToolResponse> {
     await this.assertNameValid(dto.serverName);
-    const mcpSchema = await this.fetchMcpSchema(dto.serverUrl);
+    const kind = dto.kind ?? 'mcp';
+
+    let serverUrl: string;
+    let mcpSchema: McpToolSchema[];
+    if (kind === 'client') {
+      // Client Tools have no MCP server; serverUrl is unused and the schema is
+      // supplied manually (Phase 1, no auto-registration / connectivity test).
+      serverUrl = dto.serverUrl ?? '';
+      mcpSchema = dto.mcpSchema ?? [];
+    } else {
+      // MCP Tools fetch their schema from the server URL.
+      if (!dto.serverUrl) {
+        throw new BadRequestException('serverUrl is required for MCP tools');
+      }
+      serverUrl = dto.serverUrl;
+      mcpSchema = await this.fetchMcpSchema(dto.serverUrl);
+    }
 
     const tool = this.toolRepository.create({
       serverName: dto.serverName,
-      serverUrl: dto.serverUrl,
+      serverUrl,
+      kind,
+      source: 'database',
       mcpSchema,
       createdOn: new Date(),
       createdBy,
@@ -144,10 +168,22 @@ export class ToolService {
       tool.serverName = dto.serverName;
     }
 
-    // Changing the URL re-fetches the MCP schema.
-    if (dto.serverUrl !== undefined && dto.serverUrl !== tool.serverUrl) {
-      tool.mcpSchema = await this.fetchMcpSchema(dto.serverUrl);
-      tool.serverUrl = dto.serverUrl;
+    if (dto.kind !== undefined) {
+      tool.kind = dto.kind;
+    }
+
+    if (tool.kind === 'client') {
+      // Client Tool: update serverUrl/schema directly, no connectivity fetch.
+      if (dto.serverUrl !== undefined) tool.serverUrl = dto.serverUrl;
+      if (dto.mcpSchema !== undefined) tool.mcpSchema = dto.mcpSchema;
+    } else {
+      // MCP Tool: changing the URL re-fetches the schema.
+      if (dto.serverUrl !== undefined && dto.serverUrl !== tool.serverUrl) {
+        tool.mcpSchema = await this.fetchMcpSchema(dto.serverUrl);
+        tool.serverUrl = dto.serverUrl;
+      } else if (dto.mcpSchema !== undefined) {
+        tool.mcpSchema = dto.mcpSchema;
+      }
     }
 
     tool.updatedOn = new Date();

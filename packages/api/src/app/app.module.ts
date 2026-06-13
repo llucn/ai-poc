@@ -17,6 +17,7 @@ import { ToolModule } from './tool/tool.module';
 import { SkillModule } from './skill/skill.module';
 import { SessionModule } from './session/session.module';
 import { LlmModule } from './llm/llm.module';
+import { ClientToolsModule } from './client-tools/client-tools.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { LlmModule } from './llm/llm.module';
     SkillModule,
     SessionModule,
     LlmModule,
+    ClientToolsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -30,9 +30,13 @@ INSERT INTO t_user (name, display_name, email, role, skill_matrix, is_available,
 
 -- Table: t_agent
 -- AI Agent basic information, model config and system prompt.
--- model_config stores { baseUrl, authToken, modelName } as JSON;
--- authToken holds the model API key. is_default marks the single default
--- agent (at most one row has is_default = 1, enforced in the app layer).
+-- is_default marks the single default agent (at most one row has
+-- is_default = 1, enforced in the app layer).
+-- model_config JSON shape: { baseUrl, authToken, modelName }, where
+-- authToken is the Anthropic API key, modelName is a Claude model id
+-- (e.g. 'claude-opus-4-8'), and baseUrl is the Anthropic Messages API
+-- base URL (omit / leave null to use the SDK default).
+-- Per-call max_tokens is set in the API layer (global default constant).
 CREATE TABLE IF NOT EXISTS t_agent (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
@@ -174,7 +178,11 @@ CREATE TABLE IF NOT EXISTS t_message (
 -- /sessions/:id/client-result, which loads this row and resumes the loop.
 --
 -- call_id is a UUID used as the idempotency key on resume.
--- message_context stores the LLM messages array captured at suspend time.
+-- tool_use_id is the originating Anthropic `tool_use` block id, used to
+--   correlate the `tool_result` block when the loop resumes.
+-- message_context stores the Anthropic MessageParam array captured at suspend
+--   time (native blocks, including the assistant `tool_use` that triggered the
+--   suspension).
 -- status: 'pending' | 'completed' | 'failed' | 'timeout'.
 CREATE TABLE IF NOT EXISTS t_pending_client_call (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -183,6 +191,7 @@ CREATE TABLE IF NOT EXISTS t_pending_client_call (
   agent_id INT NOT NULL,
   tool_id INT NOT NULL,
   tool_name VARCHAR(255) NOT NULL,
+  tool_use_id VARCHAR(255) NOT NULL,
   params JSON NULL,
   message_context JSON NOT NULL,
   status VARCHAR(16) NOT NULL DEFAULT 'pending',

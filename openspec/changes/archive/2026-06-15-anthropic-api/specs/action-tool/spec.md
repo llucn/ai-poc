@@ -1,8 +1,5 @@
-# action-tool Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change action-tool. Update Purpose after archive.
-## Requirements
 ### Requirement: LLM action output triggers MCP tool execution
 
 The system SHALL detect when the LLM emits a native Anthropic `tool_use` content block (response `stop_reason: "tool_use"`) and execute the referenced MCP tool, reading the tool name and parameters directly from the block's `name` and `input` fields. The system MUST NOT require a JSON envelope (`{"action": ...}`) and MUST NOT strip Markdown code fences or brace-match the model output. A final answer is the assistant's text content when `stop_reason` is `end_turn`.
@@ -21,44 +18,6 @@ The system SHALL detect when the LLM emits a native Anthropic `tool_use` content
 
 - **WHEN** a `tool_use` block's `name` does not match the `mcp__<id>__<name>` or `client__<id>__<name>` format
 - **THEN** the system constructs an error observation (`tool_result`) describing the invalid tool name and continues the loop
-
-### Requirement: Tool name parsing extracts agent tool ID and tool name
-
-The system SHALL parse the tool identifier from the native `tool_use` block's `name` field using the format `<prefix>__<id>__<toolName>`, where `prefix` is `mcp` or `client`, `id` is the numeric `t_tool` ID, and `toolName` is the tool name (which MAY itself contain underscores). The parser MUST split on exactly the first two `__` delimiters to correctly handle tool names containing underscores.
-
-#### Scenario: Parse standard tool name
-
-- **WHEN** the `tool_use.name` is `mcp__5__getWeatherForecastByLocation`
-- **THEN** the parsed prefix is `mcp`, the tool id is `5`, and the tool name is `getWeatherForecastByLocation`
-
-#### Scenario: Parse tool name with underscores
-
-- **WHEN** the `tool_use.name` is `mcp__12__get_user_profile`
-- **THEN** the parsed tool id is `12` and the tool name is `get_user_profile`
-
-#### Scenario: Invalid tool name format
-
-- **WHEN** the `tool_use.name` does not match the `<prefix>__<id>__<name>` format
-- **THEN** the system treats it as a parse error and returns an error `tool_result`
-
-### Requirement: MCP tool execution via JSON-RPC
-
-The system SHALL execute MCP tools by looking up the `server_url` from the `t_tool` table using the parsed tool ID, then sending a JSON-RPC `tools/call` request to that server URL with the tool name and the `tool_use` block's `input` as parameters. The system MUST use the existing MCP JSON-RPC client infrastructure (HTTP POST with `Content-Type: application/json`).
-
-#### Scenario: Successful tool execution
-
-- **WHEN** the system calls `tools/call` on the MCP server at `server_url` with the tool name and `input`
-- **THEN** the MCP server returns a result, and the system constructs a `tool_result` block carrying that result
-
-#### Scenario: Tool execution fails
-
-- **WHEN** the MCP server returns an error or the HTTP call fails
-- **THEN** the system constructs an error `tool_result` block carrying the failure detail so the LLM can handle it
-
-#### Scenario: Tool ID not found in database
-
-- **WHEN** the parsed tool ID does not exist in `t_tool`
-- **THEN** the system constructs an error `tool_result` indicating the tool was not found
 
 ### Requirement: Observation messages are recorded as Thought Messages
 
@@ -111,3 +70,41 @@ The system SHALL enforce a maximum of 20 tool calls per single user message. If 
 
 - **WHEN** the LLM produces an `end_turn` final answer after 5 tool calls
 - **THEN** the loop completes normally with the final answer as the assistant reply
+
+### Requirement: Tool name parsing extracts agent tool ID and tool name
+
+The system SHALL parse the tool identifier from the native `tool_use` block's `name` field using the format `<prefix>__<id>__<toolName>`, where `prefix` is `mcp` or `client`, `id` is the numeric `t_tool` ID, and `toolName` is the tool name (which MAY itself contain underscores). The parser MUST split on exactly the first two `__` delimiters to correctly handle tool names containing underscores.
+
+#### Scenario: Parse standard tool name
+
+- **WHEN** the `tool_use.name` is `mcp__5__getWeatherForecastByLocation`
+- **THEN** the parsed prefix is `mcp`, the tool id is `5`, and the tool name is `getWeatherForecastByLocation`
+
+#### Scenario: Parse tool name with underscores
+
+- **WHEN** the `tool_use.name` is `mcp__12__get_user_profile`
+- **THEN** the parsed tool id is `12` and the tool name is `get_user_profile`
+
+#### Scenario: Invalid tool name format
+
+- **WHEN** the `tool_use.name` does not match the `<prefix>__<id>__<name>` format
+- **THEN** the system treats it as a parse error and returns an error `tool_result`
+
+### Requirement: MCP tool execution via JSON-RPC
+
+The system SHALL execute MCP tools by looking up the `server_url` from the `t_tool` table using the parsed tool ID, then sending a JSON-RPC `tools/call` request to that server URL with the tool name and the `tool_use` block's `input` as parameters. The system MUST use the existing MCP JSON-RPC client infrastructure (HTTP POST with `Content-Type: application/json`).
+
+#### Scenario: Successful tool execution
+
+- **WHEN** the system calls `tools/call` on the MCP server at `server_url` with the tool name and `input`
+- **THEN** the MCP server returns a result, and the system constructs a `tool_result` block carrying that result
+
+#### Scenario: Tool execution fails
+
+- **WHEN** the MCP server returns an error or the HTTP call fails
+- **THEN** the system constructs an error `tool_result` block carrying the failure detail so the LLM can handle it
+
+#### Scenario: Tool ID not found in database
+
+- **WHEN** the parsed tool ID does not exist in `t_tool`
+- **THEN** the system constructs an error `tool_result` indicating the tool was not found

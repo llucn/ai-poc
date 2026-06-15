@@ -84,7 +84,11 @@
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('INSTRUCTION:'\\); print\\(d['instruction']\\); print\\('TEMPLATE:'\\); print\\(d['template']\\)\")",
       "Bash(npm view *)",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('scripts:', json.dumps\\(d.get\\('scripts',{}\\), indent=2\\)\\); print\\('devDeps that match test:', [k for k in d.get\\('devDependencies',{}\\) if 'test' in k or 'vitest' in k or 'jest' in k]\\)\")",
-      "Bash(echo \"tsc exit=$?\")"
+      "Bash(echo \"tsc exit=$?\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('OUTPUT:', d['outputPath']\\); print\\('TEMPLATE:'\\); print\\(d['template']\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('OUTPUT:', d['outputPath']\\); print\\(d['template']\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(d['template']\\)\")",
+      "Bash(python3 *)"
     ]
   }
 }

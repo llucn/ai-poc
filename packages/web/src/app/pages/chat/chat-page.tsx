@@ -142,7 +142,7 @@ export function ChatPage() {
 
       // Consume one SSE stream. Resolves with the pending client_call (if the
       // turn suspended) or null (if it ended normally / errored).
-      type ClientCall = { callId: string; toolName: string; params: unknown };
+      type ClientCall = { callId: string; toolUseId: string; toolName: string; params: unknown };
       const consume = (url: string, body: string): Promise<ClientCall | null> => {
         let clientCall: ClientCall | null = null;
         return fetchEventSource(url, {
@@ -193,7 +193,7 @@ export function ChatPage() {
         JSON.stringify({ content })
       );
       while (clientCall) {
-        const { callId, toolName, params } = clientCall;
+        const { callId, toolUseId, toolName, params } = clientCall;
         setPendingClientTool(toolName);
         // Execute the tool in the browser; never throws (errors are captured).
         const outcome = await executeClientTool(toolName, params);
@@ -204,7 +204,7 @@ export function ChatPage() {
         );
         clientCall = await consume(
           `/api/sessions/${sid}/client-result`,
-          JSON.stringify({ callId, ...outcome })
+          JSON.stringify({ callId, toolUseId, ...outcome })
         );
       }
 

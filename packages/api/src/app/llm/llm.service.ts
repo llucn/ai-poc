@@ -48,9 +48,10 @@ export type AnthropicMessages = MessageParam[];
  * API already validated.
  *
  * - `final`     — `stop_reason: "end_turn"`; `text` is the assistant's reply
- * - `tool_use`  — `stop_reason: "tool_use"`; loop must execute the tool and
- *                 send back a `tool_result` keyed by `toolUseId`. `text` is
- *                 any thought text the model emitted alongside (may be empty).
+ * - `tool_use`  — `stop_reason: "tool_use"`; loop must execute ALL tools and
+ *                 send back a merged `tool_result` user turn. `text` is any
+ *                 thought text the model emitted alongside (may be empty).
+ *                 `toolUses` is an array of all tool_use blocks in this turn.
  *                 `assistantContent` is the full assistant content array as
  *                 returned, ready to be appended to the live message context.
  * - `error`     — transport, SDK, or unexpected stop_reason failure (e.g.
@@ -61,9 +62,7 @@ export type LlmTurn =
   | {
       kind: 'tool_use';
       text: string;
-      toolUseId: string;
-      toolName: string;
-      input: unknown;
+      toolUses: { id: string; name: string; input: unknown }[];
       assistantContent: ContentBlockParam[];
     }
   | { kind: 'error'; message: string };
@@ -146,17 +145,17 @@ export class LlmService {
         };
       }
 
-      // Collect text and find the last tool_use block (Claude emits at most
-      // one when stop_reason is "tool_use").
+      // Collect text and all tool_use blocks (Anthropic supports multiple
+      // tool calls per turn for parallel tool use).
       let text = '';
-      let toolUse: { id: string; name: string; input: unknown } | null = null;
+      const toolUses: { id: string; name: string; input: unknown }[] = [];
       const assistantContent: ContentBlockParam[] = [];
       for (const block of response.content) {
         if (block.type === 'text') {
           text += block.text;
           assistantContent.push({ type: 'text', text: block.text });
         } else if (block.type === 'tool_use') {
-          toolUse = { id: block.id, name: block.name, input: block.input };
+          toolUses.push({ id: block.id, name: block.name, input: block.input });
           assistantContent.push({
             type: 'tool_use',
             id: block.id,
@@ -169,7 +168,7 @@ export class LlmService {
       }
 
       if (response.stop_reason === 'tool_use') {
-        if (!toolUse) {
+        if (toolUses.length === 0) {
           return {
             kind: 'error',
             message:
@@ -179,9 +178,7 @@ export class LlmService {
         return {
           kind: 'tool_use',
           text,
-          toolUseId: toolUse.id,
-          toolName: toolUse.name,
-          input: toolUse.input,
+          toolUses,
           assistantContent,
         };
       }

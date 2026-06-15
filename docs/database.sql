@@ -156,6 +156,15 @@ CREATE TABLE IF NOT EXISTS t_session (
 -- for bot replies. message_type: 1=Text, 2=Image (only Text supported now).
 -- is_thought: 1 marks an assistant "thought" entry rendered as a
 -- collapsible note in the chat timeline; 0 is a regular message.
+--
+-- Native content fields (for Anthropic Messages API reconstruction):
+-- - native_content: JSON array of ContentBlockParam (text/tool_use/tool_result)
+-- - message_role: 'user' | 'assistant' (for API reconstruction)
+-- - turn_id: groups messages in the same turn for timeline rendering
+--
+-- Backward compatibility: rows with native_content = NULL fall back to
+-- content (text-only). New messages store both content (display) and
+-- native_content (API reconstruction).
 CREATE TABLE IF NOT EXISTS t_message (
   id INT AUTO_INCREMENT PRIMARY KEY,
   session_id INT NOT NULL,
@@ -163,11 +172,15 @@ CREATE TABLE IF NOT EXISTS t_message (
   message_type INT NOT NULL DEFAULT 1,
   is_thought INT NOT NULL DEFAULT 0,
   content LONGTEXT NULL,
+  native_content JSON NULL COMMENT 'Anthropic MessageParam content blocks',
+  message_role VARCHAR(16) NULL COMMENT 'user | assistant',
+  turn_id INT NULL COMMENT 'Groups messages in the same turn',
   created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_by VARCHAR(255) NOT NULL,
   updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   updated_by VARCHAR(255) NULL,
-  INDEX idx_message_session_id (session_id)
+  INDEX idx_message_session_id (session_id),
+  INDEX idx_message_session_turn (session_id, turn_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table: t_pending_client_call
@@ -193,7 +206,7 @@ CREATE TABLE IF NOT EXISTS t_pending_client_call (
   tool_name VARCHAR(255) NOT NULL,
   tool_use_id VARCHAR(255) NOT NULL,
   params JSON NULL,
-  message_context JSON NOT NULL,
+  message_context JSON NULL,
   status VARCHAR(16) NOT NULL DEFAULT 'pending',
   created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_by VARCHAR(255) NOT NULL,

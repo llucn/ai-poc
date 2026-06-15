@@ -10,10 +10,7 @@ import type {
 } from '@anthropic-ai/sdk/resources/messages';
 import { SessionEntity } from './session.entity';
 import { MessageEntity } from './message.entity';
-import {
-  PendingClientCallEntity,
-  type PendingMessageContext,
-} from './pending-client-call.entity';
+import { PendingClientCallEntity } from './pending-client-call.entity';
 import { AgentEntity } from '../agent/agent.entity';
 import { AgentToolEntity } from '../agent/agent-tool.entity';
 import { AgentSkillEntity } from '../agent/agent-skill.entity';
@@ -33,6 +30,13 @@ import type {
   ClientResultDto,
 } from './session.dto';
 import type { Response } from 'express';
+import {
+  reconstructNativeMessages,
+  createUserMessage,
+  createAssistantMessage,
+  createAssistantToolUseMessage,
+  createToolResultsMessage,
+} from './message-native.helper';
 
 const ASSISTANT_USER = 'ASSISTANT';
 const MAX_TOOL_CALLS = 20;
@@ -66,10 +70,6 @@ export function parseToolName(
  * assistant emitted no text alongside it. The Thought row keeps a readable
  * timeline of what the model decided each turn.
  */
-function renderToolUseAsThought(toolName: string, input: unknown): string {
-  return JSON.stringify({ tool_use: { name: toolName, input } });
-}
-
 /**
  * Build a successful tool_result block for the in-memory message context.
  * The `content` field is stringified JSON so it round-trips cleanly through
@@ -109,15 +109,6 @@ function buildErrorToolResultBlock(
  * existing collapsible ThoughtMessage component renders the result the same
  * way it always has.
  */
-function buildObservationThoughtContent(
-  result: unknown,
-  isError: boolean
-): string {
-  return JSON.stringify({
-    observation: isError ? `Error: ${String(result)}` : result,
-  });
-}
-
 @Injectable()
 export class SessionService {
   private readonly logger = new Logger(SessionService.name);
@@ -290,24 +281,25 @@ export class SessionService {
         throw new NotFoundException(`Session with id ${sessionId} not found`);
       }
 
+      // Locate the specific pending record by (callId, toolUseId) composite key (D4, D5).
       const pending = await this.pendingClientCallRepository.findOne({
-        where: { callId: dto.callId },
+        where: { callId: dto.callId, toolUseId: dto.toolUseId },
       });
       if (!pending) {
         throw new NotFoundException(
-          `Pending client call ${dto.callId} not found`
+          `Pending client call ${dto.callId}/${dto.toolUseId} not found`
         );
       }
       if (pending.sessionId !== sessionId) {
         throw new NotFoundException(
-          `Pending client call ${dto.callId} does not belong to session ${sessionId}`
+          `Pending client call does not belong to session ${sessionId}`
         );
       }
 
-      // Idempotency: already resumed → ignore duplicate result POST.
+      // Idempotency: already completed → send done and return.
       if (pending.status !== 'pending') {
         this.logger.warn(
-          `Duplicate client-result for callId=${dto.callId} (status=${pending.status}); ignoring`
+          `Duplicate client-result for callId=${dto.callId} toolUseId=${dto.toolUseId} (status=${pending.status}); ignoring`
         );
         res.write(`event: done\n`);
         res.write(`data: ${JSON.stringify({ duplicate: true })}\n\n`);
@@ -323,60 +315,59 @@ export class SessionService {
         );
       }
 
-      // Build the tool_result from the client's result (or error), correlated
-      // to the suspended tool_use by its id (saved on the pending row).
-      const isError = dto.error !== undefined && dto.error !== null;
-      const toolResultBlock: ToolResultBlockParam = isError
-        ? buildErrorToolResultBlock(pending.toolUseId, String(dto.error))
-        : buildToolResultBlock(pending.toolUseId, dto.result ?? null);
-
-      const observationThought = buildObservationThoughtContent(
-        isError ? String(dto.error) : (dto.result ?? null),
-        isError
-      );
-
-      // Persist the observation as a Thought and push it.
       const now = new Date();
-      const observationMessage = this.messageRepository.create({
-        sessionId,
-        userName: ASSISTANT_USER,
-        messageType: 1,
-        isThought: 1,
-        content: observationThought,
-        createdOn: now,
-        createdBy: `assistant/${createdBy}`,
-      });
-      const savedObservationMsg = await this.messageRepository.save(
-        observationMessage
-      );
-      res.write(`event: thought_created\n`);
-      res.write(`data: ${JSON.stringify(savedObservationMsg)}\n\n`);
 
-      // Restore the suspended message context and append the tool_result as a
-      // user-role turn (tool_result blocks always live inside a user turn).
-      const messages: PendingMessageContext = [
-        ...pending.messageContext,
-        { role: 'user', content: [toolResultBlock] },
-      ];
-
-      // Mark the pending call resolved before continuing (idempotency guard).
+      // Write the tool result into this pending record's message_context (D7, D8).
+      const isError = dto.error !== undefined && dto.error !== null;
+      if (isError) {
+        pending.messageContext = { error: String(dto.error) };
+      } else {
+        pending.messageContext = {
+          type: 'tool_result',
+          tool_use_id: pending.toolUseId,
+          content: JSON.stringify(dto.result ?? null),
+        };
+      }
       pending.status = 'completed';
       pending.updatedOn = now;
       pending.updatedBy = createdBy;
       await this.pendingClientCallRepository.save(pending);
 
-      // Carry forward the tool-call count from the restored context so the
-      // 20-cap survives suspend/resume. Each completed tool round contributes
-      // one assistant turn containing a `tool_use` block.
-      const startToolCallCount = countToolUseRounds(pending.messageContext);
+      // Check if there are more pending Client Tools for this call_id (D6: serial dispatch).
+      const dispatched = await this.dispatchNextClientTool(dto.callId, res);
+      if (dispatched) {
+        // Another client tool was dispatched - suspend again
+        await this.finalizeSession(session, createdBy);
+        return;
+      }
+
+      // All tools completed - merge results and continue loop.
+      const toolResults = await this.mergeToolResults(
+        dto.callId,
+        sessionId,
+        createdBy,
+        res,
+        now,
+        0
+      );
+
+      // Rebuild the complete conversation history from t_message (D1: context reconstruction).
+      const history = await this.messageRepository.find({
+        where: { sessionId, messageType: 1 },
+        order: { createdOn: 'ASC', id: 'ASC' },
+        take: 50,
+      });
+      const messages = reconstructNativeMessages(history);
+
+      // Append the merged tool_result user turn and continue the loop.
+      messages.push({ role: 'user', content: toolResults });
 
       await this.runLoop(
         session,
         agent,
         messages,
         createdBy,
-        res,
-        startToolCallCount
+        res
       );
     } catch (err) {
       const errorMessage =
@@ -388,6 +379,7 @@ export class SessionService {
       res.end();
     }
   }
+
 
   /**
    * Run a full multi-turn assistant turn for a session: persist the user
@@ -450,38 +442,27 @@ export class SessionService {
 
     // Save user message (one-time, before the loop starts)
     const userMessage = this.messageRepository.create({
-      sessionId,
-      userName,
-      messageType: 1,
-      isThought: 0,
-      content,
+      ...createUserMessage(sessionId, userName, content, createdBy),
       createdOn: now,
-      createdBy,
     });
     await this.messageRepository.save(userMessage);
 
-    // Build the initial native context from session history. The history
-    // already includes the user message we just saved. Per design D4 we use
-    // ONLY user/assistant text rows (`isThought=0`) so prior turns' internal
-    // tool scaffolding never makes it into the request — that scaffolding is
-    // not needed for the model to continue the conversation, and replaying it
-    // would risk an unbalanced tool_use/tool_result sequence.
+    // Build the initial native context from session history. With native
+    // content support, reconstructNativeMessages() reads the full conversation
+    // including all tool_use/tool_result blocks from prior turns — fixing the
+    // "gateway.upstream_unavailable" bug caused by missing tool context.
     const history = await this.messageRepository.find({
-      where: { sessionId, isThought: 0, messageType: 1 },
-      order: { createdOn: 'DESC', id: 'DESC' },
-      take: 200,
+      where: { sessionId, messageType: 1 },
+      order: { createdOn: 'ASC', id: 'ASC' },
+      take: 50,  // Last 50 messages (~25 turns) to limit payload size
     });
-    history.reverse();
 
-    const messages: MessageParam[] = history.map((msg) => ({
-      role: msg.userName === ASSISTANT_USER ? ('assistant' as const) : ('user' as const),
-      content: msg.content || '',
-    }));
+    const messages: MessageParam[] = reconstructNativeMessages(history);
 
     // Run the (re-entrant) agent loop. It runs until final_answer/error, the
     // tool-call cap, or a Client Tool suspends it (returns early after pushing
     // a `client_call` event).
-    await this.runLoop(session, agent, messages, createdBy, res, 0);
+    await this.runLoop(session, agent, messages, createdBy, res);
   }
 
   /**
@@ -510,13 +491,12 @@ export class SessionService {
     agent: AgentEntity,
     messages: MessageParam[],
     createdBy: string,
-    res: Response,
-    startToolCallCount: number
+    res: Response
   ): Promise<void> {
     const sessionId = session.id;
     const now = new Date();
     let timestampOffset = 1;
-    let toolCallCount = startToolCallCount;
+    let toolCallCount = 0;
 
     const system = await this.buildSystemContent(agent);
     const availableTools = await this.getAvailableTools(agent.id);
@@ -540,51 +520,38 @@ export class SessionService {
       );
       this.logger.log(
         `LLM turn for session ${sessionId}: kind=${turn.kind}` +
-          (turn.kind === 'tool_use' ? ` tool=${turn.toolName}` : '')
+          (turn.kind === 'tool_use' ? ` tools=${turn.toolUses.length}` : '')
       );
 
-      // Step 2: persist the assistant thought as a Thought message and push.
-      const thoughtContent =
-        turn.kind === 'final'
-          ? turn.text
-          : turn.kind === 'tool_use'
-          ? turn.text || renderToolUseAsThought(turn.toolName, turn.input)
-          : `Error: ${turn.message}`;
-
-      const thoughtMessage = this.messageRepository.create({
-        sessionId,
-        userName: ASSISTANT_USER,
-        messageType: 1,
-        isThought: 1,
-        content: thoughtContent,
-        createdOn: new Date(now.getTime() + timestampOffset++),
-        createdBy: `assistant/${createdBy}`,
-      });
-      const savedThoughtMsg = await this.messageRepository.save(thoughtMessage);
-      res.write(`event: thought_created\n`);
-      res.write(`data: ${JSON.stringify(savedThoughtMsg)}\n\n`);
-
-      // Step 3: dispatch
+      // Step 2: dispatch on turn kind
       if (turn.kind === 'final' || turn.kind === 'error') {
+        // Persist thought (the text the model emitted before finalizing)
+        const thoughtText = turn.kind === 'final' ? turn.text : null;
+        if (thoughtText) {
+          const thoughtMessage = this.messageRepository.create({
+            sessionId,
+            userName: ASSISTANT_USER,
+            messageType: 1,
+            isThought: 1,
+            content: thoughtText,
+            createdOn: new Date(now.getTime() + timestampOffset++),
+            createdBy: `assistant/${createdBy}`,
+          });
+          const savedThoughtMsg = await this.messageRepository.save(thoughtMessage);
+          res.write(`event: thought_created\n`);
+          res.write(`data: ${JSON.stringify(savedThoughtMsg)}\n\n`);
+        }
+
         if (turn.kind === 'error') {
-          // Surface as an SSE error event for the UI; persisting an assistant
-          // reply with the error text keeps the session readable on reload.
           res.write(`event: error\n`);
           res.write(`data: ${JSON.stringify({ message: turn.message })}\n\n`);
         }
         const replyContent = turn.kind === 'final' ? turn.text : `Error: ${turn.message}`;
         const assistantMessage = this.messageRepository.create({
-          sessionId,
-          userName: ASSISTANT_USER,
-          messageType: 1,
-          isThought: 0,
-          content: replyContent,
+          ...createAssistantMessage(sessionId, replyContent, `assistant/${createdBy}`),
           createdOn: new Date(now.getTime() + timestampOffset++),
-          createdBy: `assistant/${createdBy}`,
         });
-        const savedAssistantMsg = await this.messageRepository.save(
-          assistantMessage
-        );
+        const savedAssistantMsg = await this.messageRepository.save(assistantMessage);
         res.write(`event: message_created\n`);
         res.write(`data: ${JSON.stringify(savedAssistantMsg)}\n\n`);
         await this.finalizeSession(session, createdBy);
@@ -606,110 +573,173 @@ export class SessionService {
         return;
       }
 
-      // Append the assistant turn (text + tool_use) to the live context. The
-      // next user turn will carry the tool_result.
+      // Append the assistant turn (text + tool_use blocks) to the live context.
       messages.push({ role: 'assistant', content: turn.assistantContent });
 
-      // Route by tool kind. Client tools suspend the loop; MCP tools run inline.
-      const classified = parseToolName(turn.toolName);
-      if (classified && classified.prefix === 'client') {
-        await this.suspendForClientTool(
-          session,
-          agent,
-          messages,
-          {
-            toolUseId: turn.toolUseId,
-            toolName: turn.toolName,
-            input: turn.input,
-          },
-          classified.toolId,
-          classified.toolName,
+      // Persist the complete assistant tool_use turn to DB (D2: one row per turn).
+      const assistantToolUseMsg = this.messageRepository.create({
+        ...createAssistantToolUseMessage(
+          sessionId,
+          turn.assistantContent,
+          `assistant/${createdBy}`
+        ),
+        createdOn: new Date(now.getTime() + timestampOffset++),
+      });
+      const savedToolUseMsg = await this.messageRepository.save(assistantToolUseMsg);
+      res.write(`event: thought_created\n`);
+      res.write(`data: ${JSON.stringify(savedToolUseMsg)}\n\n`);
+
+      // Generate a shared call_id for this turn (D4: grouping key).
+      const callId = randomUUID();
+
+      // Create pending records for all tool_use blocks (D3: parallel tool use).
+      const pendingRecords: PendingClientCallEntity[] = [];
+      for (const toolUse of turn.toolUses) {
+        const classified = parseToolName(toolUse.name);
+        if (!classified) {
+          this.logger.warn(`Invalid tool name format: ${toolUse.name}`);
+          continue;
+        }
+
+        const pending = this.pendingClientCallRepository.create({
+          callId,
+          sessionId: session.id,
+          agentId: agent.id,
+          toolId: classified.toolId,
+          toolName: classified.toolName,
+          toolUseId: toolUse.id,
+          params: toolUse.input ?? {},
+          messageContext: null, // Will be filled when tool completes
+          status: 'pending',
+          createdOn: new Date(),
           createdBy,
-          res
-        );
-        return; // suspended — browser will POST the result to resume
+        });
+        await this.pendingClientCallRepository.save(pending);
+        pendingRecords.push(pending);
       }
 
-      // MCP tool (or invalid name): execute server-side and produce a
-      // tool_result block.
-      const { toolResult, observationContent, isError } = await this.executeTool(
-        turn.toolUseId,
-        turn.toolName,
-        turn.input
-      );
+      // Execute MCP tools immediately (D6: MCP tools run server-side).
+      for (const pending of pendingRecords) {
+        const classified = parseToolName(`mcp__${pending.toolId}__${pending.toolName}`)!;
+        if (classified.prefix === 'mcp') {
+          const { toolResult } = await this.executeTool(
+            pending.toolUseId,
+            `mcp__${pending.toolId}__${pending.toolName}`,
+            pending.params
+          );
+          pending.messageContext = {
+            type: 'tool_result',
+            tool_use_id: pending.toolUseId,
+            content: toolResult.content as string,
+          };
+          pending.status = 'completed';
+          pending.updatedOn = new Date();
+          pending.updatedBy = createdBy;
+          await this.pendingClientCallRepository.save(pending);
+        }
+      }
 
-      // Persist the observation as a Thought for the chat timeline.
-      const observationMessage = this.messageRepository.create({
-        sessionId,
-        userName: ASSISTANT_USER,
-        messageType: 1,
-        isThought: 1,
-        content: observationContent,
-        createdOn: new Date(now.getTime() + timestampOffset++),
-        createdBy: `assistant/${createdBy}`,
-      });
-      const savedObservationMsg = await this.messageRepository.save(
-        observationMessage
-      );
-      res.write(`event: thought_created\n`);
-      res.write(`data: ${JSON.stringify(savedObservationMsg)}\n\n`);
+      // Dispatch the first pending Client Tool (D6: serial dispatch).
+      const dispatched = await this.dispatchNextClientTool(callId, res);
+      if (dispatched) {
+        // Suspended - browser will POST the result to resume
+        await this.finalizeSession(session, createdBy);
+        return;
+      }
 
-      // Append the tool_result as a user turn so the model receives it on the
-      // next call.
-      messages.push({ role: 'user', content: [toolResult] });
+      // No client tools (all MCP) - merge results and continue loop.
+      const toolResults = await this.mergeToolResults(callId, sessionId, createdBy, res, now, timestampOffset);
+      timestampOffset += 1;
+      messages.push({ role: 'user', content: toolResults });
       toolCallCount++;
-      // isError is intentionally not surfaced as an SSE error — the model is
-      // expected to react to the tool failure on the next turn.
-      void isError;
     }
   }
 
   /**
-   * Suspend the loop for a Client Tool call: persist the suspended native
-   * context (with the originating `tool_use_id`) to t_pending_client_call,
-   * push a `client_call` SSE event for the browser to execute, and finalize
-   * the session. The loop resumes via resumeClientResult once the browser
-   * POSTs the result.
+   * Dispatch the next pending Client Tool for the given call_id (D6: serial dispatch).
+   * Returns true if a client_call was sent (loop suspended), false if no pending client tools.
    */
-  private async suspendForClientTool(
-    session: SessionEntity,
-    agent: AgentEntity,
-    messages: MessageParam[],
-    pendingToolUse: { toolUseId: string; toolName: string; input: unknown },
-    toolId: number,
-    toolName: string,
-    createdBy: string,
+  private async dispatchNextClientTool(
+    callId: string,
     res: Response
-  ): Promise<void> {
-    const callId = randomUUID();
-    const pending = this.pendingClientCallRepository.create({
-      callId,
-      sessionId: session.id,
-      agentId: agent.id,
-      toolId,
-      toolName,
-      toolUseId: pendingToolUse.toolUseId,
-      params: pendingToolUse.input ?? {},
-      messageContext: messages,
-      status: 'pending',
-      createdOn: new Date(),
-      createdBy,
+  ): Promise<boolean> {
+    const nextClientTool = await this.pendingClientCallRepository.findOne({
+      where: { callId, status: 'pending' },
+      order: { id: 'ASC' },
     });
-    await this.pendingClientCallRepository.save(pending);
+
+    if (!nextClientTool) {
+      return false; // No more pending client tools
+    }
+
+    // Check if it's actually a client tool (prefix check)
+    const classified = parseToolName(`client__${nextClientTool.toolId}__${nextClientTool.toolName}`);
+    if (!classified || classified.prefix !== 'client') {
+      return false;
+    }
 
     this.logger.log(
-      `Suspending session ${session.id} for client tool ${toolName} (callId=${callId}, toolUseId=${pendingToolUse.toolUseId})`
+      `Dispatching client tool: ${nextClientTool.toolName} (callId=${callId}, toolUseId=${nextClientTool.toolUseId})`
     );
+
     res.write(`event: client_call\n`);
     res.write(
       `data: ${JSON.stringify({
         callId,
-        toolName,
-        params: pendingToolUse.input ?? {},
+        toolUseId: nextClientTool.toolUseId,
+        toolName: `client__${nextClientTool.toolId}__${nextClientTool.toolName}`,
+        params: nextClientTool.params ?? {},
       })}\n\n`
     );
 
-    await this.finalizeSession(session, createdBy);
+    return true; // Suspended
+  }
+
+  /**
+   * Merge all completed tool results for the given call_id into one tool_result message (D2).
+   * Returns the array of tool_result blocks to append to the live messages context.
+   */
+  private async mergeToolResults(
+    callId: string,
+    sessionId: number,
+    createdBy: string,
+    res: Response,
+    now: Date,
+    timestampOffset: number
+  ): Promise<ContentBlockParam[]> {
+    const allPending = await this.pendingClientCallRepository.find({
+      where: { callId },
+      order: { id: 'ASC' },
+    });
+
+    const toolResults: ContentBlockParam[] = [];
+    for (const pending of allPending) {
+      if (pending.messageContext) {
+        if ('error' in pending.messageContext) {
+          // Error case: map to tool_result with is_error
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: pending.toolUseId,
+            content: pending.messageContext.error,
+            is_error: true,
+          } as ToolResultBlockParam);
+        } else {
+          // Success case
+          toolResults.push(pending.messageContext as ContentBlockParam);
+        }
+      }
+    }
+
+    // Persist the merged tool_results as one user Thought (D2).
+    const toolResultsMsg = this.messageRepository.create({
+      ...createToolResultsMessage(sessionId, toolResults, `assistant/${createdBy}`),
+      createdOn: new Date(now.getTime() + timestampOffset),
+    });
+    const savedToolResultsMsg = await this.messageRepository.save(toolResultsMsg);
+    res.write(`event: thought_created\n`);
+    res.write(`data: ${JSON.stringify(savedToolResultsMsg)}\n\n`);
+
+    return toolResults;
   }
 
   /** Update a session's last activity timestamp after a turn or suspension. */
@@ -825,7 +855,6 @@ export class SessionService {
     input: unknown
   ): Promise<{
     toolResult: ToolResultBlockParam;
-    observationContent: string;
     isError: boolean;
   }> {
     const parsed = parseToolName(toolName);
@@ -834,7 +863,6 @@ export class SessionService {
       this.logger.warn(message);
       return {
         toolResult: buildErrorToolResultBlock(toolUseId, message),
-        observationContent: buildObservationThoughtContent(message, true),
         isError: true,
       };
     }
@@ -847,7 +875,6 @@ export class SessionService {
       this.logger.warn(message);
       return {
         toolResult: buildErrorToolResultBlock(toolUseId, message),
-        observationContent: buildObservationThoughtContent(message, true),
         isError: true,
       };
     }
@@ -860,7 +887,6 @@ export class SessionService {
       );
       return {
         toolResult: buildToolResultBlock(toolUseId, result),
-        observationContent: buildObservationThoughtContent(result, false),
         isError: false,
       };
     } catch (err) {
@@ -870,7 +896,6 @@ export class SessionService {
       );
       return {
         toolResult: buildErrorToolResultBlock(toolUseId, message),
-        observationContent: buildObservationThoughtContent(message, true),
         isError: true,
       };
     }
@@ -924,25 +949,6 @@ export class SessionService {
  * counted because it is a round the model has *initiated*; the cap fires when
  * the model would start a 21st round.
  */
-export function countToolUseRounds(messages: MessageParam[]): number {
-  let n = 0;
-  for (const msg of messages) {
-    if (msg.role !== 'assistant') continue;
-    if (typeof msg.content === 'string') continue;
-    if (containsBlockOfType(msg.content, 'tool_use')) n++;
-  }
-  return n;
-}
-
-function containsBlockOfType(
-  content: ContentBlockParam[],
-  type: 'tool_use' | 'tool_result'
-): boolean {
-  for (const block of content) {
-    if (block && (block as { type?: string }).type === type) return true;
-  }
-  return false;
-}
 
 // Type re-export so the tests have a stable import surface.
 export type { ToolUseBlockParam };

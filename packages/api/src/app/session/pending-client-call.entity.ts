@@ -1,5 +1,4 @@
-import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
-import type { MessageParam } from '@anthropic-ai/sdk/resources/messages';
+import { Column, Entity, PrimaryGeneratedColumn, Index } from 'typeorm';
 
 // Status of a suspended Client Tool call.
 export type PendingClientCallStatus =
@@ -9,18 +8,13 @@ export type PendingClientCallStatus =
   | 'timeout';
 
 /**
- * The native Anthropic message context captured at suspend time.
- *
- * Each entry is an Anthropic `MessageParam` (`{ role: 'user'|'assistant',
- * content: ContentBlockParam[] | string }`) — `tool_use` blocks live inside
- * the assistant turn that triggered the suspension and `tool_result` blocks
- * live inside the user turn that resumes it. Per design D3 / D4 the live
- * loop carries this array directly; the resume path appends a `tool_result`
- * keyed by the originating `tool_use_id` (also persisted on this row in the
- * `tool_use_id` column) and re-enters the loop without any reconstruction
- * step.
+ * Single tool result object stored in message_context.
+ * Success: {type:'tool_result', tool_use_id, content}
+ * Failure: {error: string}
  */
-export type PendingMessageContext = MessageParam[];
+export type PendingToolResult =
+  | { type: 'tool_result'; tool_use_id: string; content: string }
+  | { error: string };
 
 // A suspended Client Tool call awaiting browser execution. Created when the
 // Anthropic response carries a `tool_use` block whose name starts with
@@ -28,18 +22,21 @@ export type PendingMessageContext = MessageParam[];
 // a `client_call` SSE event, and ends the request. On result POST the row is
 // loaded and the loop resumes by appending a `tool_result` block keyed by the
 // saved `tool_use_id`.
-//
-// call_id (UUID) is the idempotency key; message_context holds the Anthropic
-// MessageParam array captured at suspend time. tool_use_id is the originating
-// `tool_use` block's id, used to correlate the `tool_result` on resume. No DB
-// foreign keys — referential integrity is enforced in the application layer
-// (consistent with the other tables).
+/**
+ * Records a Client Tool call suspended mid-loop, waiting for browser execution.
+ * One assistant turn with multiple tool_use blocks creates multiple rows sharing
+ * the same call_id, each with its own tool_use_id. Uniqueness is enforced on
+ * the composite (call_id, tool_use_id).
+ */
 @Entity({ name: 't_pending_client_call' })
+@Index(['callId', 'toolUseId'], { unique: true })
 export class PendingClientCallEntity {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @Column({ name: 'call_id', type: 'varchar', length: 255, unique: true })
+  // Grouping key: multiple tool_use blocks in one assistant turn share this call_id.
+  // Composite unique with tool_use_id.
+  @Column({ name: 'call_id', type: 'varchar', length: 255 })
   callId!: string;
 
   @Column({ name: 'session_id', type: 'int' })
@@ -60,8 +57,10 @@ export class PendingClientCallEntity {
   @Column({ name: 'params', type: 'json', nullable: true })
   params!: unknown | null;
 
-  @Column({ name: 'message_context', type: 'json' })
-  messageContext!: PendingMessageContext;
+  // Single tool result object: {type:'tool_result', tool_use_id, content} or {error}.
+  // NULL while pending; written when the tool completes (MCP immediate, Client on resume).
+  @Column({ name: 'message_context', type: 'json', nullable: true })
+  messageContext!: PendingToolResult | null;
 
   @Column({ name: 'status', type: 'varchar', length: 16, default: 'pending' })
   status!: PendingClientCallStatus;

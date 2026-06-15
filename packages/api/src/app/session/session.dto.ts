@@ -16,6 +16,7 @@ export interface DeleteSessionsDto {
 // resume a suspended turn. Exactly one of result / error is set.
 export interface ClientResultDto {
   callId: string;
+  toolUseId: string;
   result?: unknown;
   error?: string;
 }

@@ -88,7 +88,8 @@
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('OUTPUT:', d['outputPath']\\); print\\('TEMPLATE:'\\); print\\(d['template']\\)\")",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('OUTPUT:', d['outputPath']\\); print\\(d['template']\\)\")",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(d['template']\\)\")",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "Bash(grep *)"
     ]
   }
 }

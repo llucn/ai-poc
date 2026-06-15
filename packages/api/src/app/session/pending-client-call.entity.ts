@@ -29,7 +29,9 @@ export type PendingToolResult =
  * the composite (call_id, tool_use_id).
  */
 @Entity({ name: 't_pending_client_call' })
-@Index(['callId', 'toolUseId'], { unique: true })
+@Index('idx_pending_call_tooluse', ['callId', 'toolUseId'], { unique: true })
+@Index('idx_pending_call_id', ['callId'])
+@Index('idx_pending_status', ['status'])
 export class PendingClientCallEntity {
   @PrimaryGeneratedColumn()
   id!: number;

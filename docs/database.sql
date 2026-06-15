@@ -185,17 +185,21 @@ CREATE TABLE IF NOT EXISTS t_message (
 
 -- Table: t_pending_client_call
 -- A suspended Client Tool call awaiting browser execution. When the LLM loop
--- emits an action whose tool name starts with `client__`, the server persists
--- the suspended context here, pushes a `client_call` SSE event, and ends the
--- request. The browser executes the tool and POSTs the result to
+-- emits a tool_use whose name starts with `client__`, the server persists a
+-- pending row here, pushes a `client_call` SSE event, and ends the request.
+-- The browser executes the tool and POSTs the result to
 -- /sessions/:id/client-result, which loads this row and resumes the loop.
 --
--- call_id is a UUID used as the idempotency key on resume.
+-- call_id groups all tool_use blocks of one assistant turn (a turn may emit
+--   several tools in parallel); it is NOT unique on its own.
 -- tool_use_id is the originating Anthropic `tool_use` block id, used to
---   correlate the `tool_result` block when the loop resumes.
--- message_context stores the Anthropic MessageParam array captured at suspend
---   time (native blocks, including the assistant `tool_use` that triggered the
---   suspension).
+--   correlate the `tool_result` block when the loop resumes. Uniqueness is
+--   enforced on the composite (call_id, tool_use_id).
+-- tool_name stores the full prefixed name (e.g. client__3__select-users) so
+--   the loop can re-route mcp vs client by re-parsing it.
+-- message_context stores this row's single tool_result object once the tool
+--   completes ({type:'tool_result', tool_use_id, content} or {error}); NULL
+--   while pending.
 -- status: 'pending' | 'completed' | 'failed' | 'timeout'.
 CREATE TABLE IF NOT EXISTS t_pending_client_call (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -212,7 +216,8 @@ CREATE TABLE IF NOT EXISTS t_pending_client_call (
   created_by VARCHAR(255) NOT NULL,
   updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   updated_by VARCHAR(255) NULL,
-  UNIQUE INDEX idx_pending_call_id (call_id),
+  UNIQUE INDEX idx_pending_call_tooluse (call_id, tool_use_id),
+  INDEX idx_pending_call_id (call_id),
   INDEX idx_pending_session_id (session_id),
   INDEX idx_pending_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

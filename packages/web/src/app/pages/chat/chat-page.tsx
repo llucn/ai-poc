@@ -194,7 +194,10 @@ export function ChatPage() {
       );
       while (clientCall) {
         const { callId, toolUseId, toolName, params } = clientCall;
-        setPendingClientTool(toolName);
+        // Strip the `client__<id>__` prefix for a friendlier UI label, but
+        // keep the full prefixed name for the registry lookup.
+        const displayName = /^client__\d+__(.+)$/.exec(toolName)?.[1] ?? toolName;
+        setPendingClientTool(displayName);
         // Execute the tool in the browser; never throws (errors are captured).
         const outcome = await executeClientTool(toolName, params);
         setPendingClientTool(null);

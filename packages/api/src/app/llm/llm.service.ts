@@ -128,6 +128,7 @@ export class LlmService {
     });
 
     try {
+      console.log('>>>>> Anthropic request', JSON.stringify(messages, null, 2));
       const response = await client.messages.create({
         model: cfg.modelName,
         max_tokens: DEFAULT_MAX_TOKENS,
@@ -135,6 +136,7 @@ export class LlmService {
         messages,
         ...(tools.length > 0 ? { tools: tools as ToolUnion[] } : {}),
       });
+      console.log('<<<<< Anthropic response', JSON.stringify(response, null, 2));
 
       // The API hard-fails on a truncated reply: never present partial text
       // as a final answer, since the model may have been mid-tool-call.

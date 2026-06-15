@@ -341,8 +341,9 @@ export class SessionService {
         return;
       }
 
-      // All tools completed - merge results and continue loop.
-      const toolResults = await this.mergeToolResults(
+      // All tools completed - merge results (persisted as one user
+      // tool_result row) and continue loop.
+      await this.mergeToolResults(
         dto.callId,
         sessionId,
         createdBy,
@@ -351,16 +352,16 @@ export class SessionService {
         0
       );
 
-      // Rebuild the complete conversation history from t_message (D1: context reconstruction).
+      // Rebuild the complete conversation history from t_message (D1).
+      // The merged tool_result row mergeToolResults just persisted is already
+      // in this query — do NOT push it again, that would duplicate the user
+      // turn and Anthropic rejects consecutive same-role messages.
       const history = await this.messageRepository.find({
         where: { sessionId, messageType: 1 },
         order: { createdOn: 'ASC', id: 'ASC' },
         take: 50,
       });
       const messages = reconstructNativeMessages(history);
-
-      // Append the merged tool_result user turn and continue the loop.
-      messages.push({ role: 'user', content: toolResults });
 
       await this.runLoop(
         session,
@@ -593,6 +594,10 @@ export class SessionService {
       const callId = randomUUID();
 
       // Create pending records for all tool_use blocks (D3: parallel tool use).
+      // Note: pending.toolName stores the FULL prefixed name (e.g.
+      // "client__7__select-users") so we can later distinguish mcp vs client
+      // by re-parsing it. The previous version stored only the bare name and
+      // had to guess the prefix, which routed client tools through MCP.
       const pendingRecords: PendingClientCallEntity[] = [];
       for (const toolUse of turn.toolUses) {
         const classified = parseToolName(toolUse.name);
@@ -606,7 +611,7 @@ export class SessionService {
           sessionId: session.id,
           agentId: agent.id,
           toolId: classified.toolId,
-          toolName: classified.toolName,
+          toolName: toolUse.name, // full prefixed name, e.g. client__7__select-users
           toolUseId: toolUse.id,
           params: toolUse.input ?? {},
           messageContext: null, // Will be filled when tool completes
@@ -618,25 +623,26 @@ export class SessionService {
         pendingRecords.push(pending);
       }
 
-      // Execute MCP tools immediately (D6: MCP tools run server-side).
+      // Execute MCP tools immediately (D6: MCP runs server-side, client
+      // tools are dispatched serially to the browser).
       for (const pending of pendingRecords) {
-        const classified = parseToolName(`mcp__${pending.toolId}__${pending.toolName}`)!;
-        if (classified.prefix === 'mcp') {
-          const { toolResult } = await this.executeTool(
-            pending.toolUseId,
-            `mcp__${pending.toolId}__${pending.toolName}`,
-            pending.params
-          );
-          pending.messageContext = {
-            type: 'tool_result',
-            tool_use_id: pending.toolUseId,
-            content: toolResult.content as string,
-          };
-          pending.status = 'completed';
-          pending.updatedOn = new Date();
-          pending.updatedBy = createdBy;
-          await this.pendingClientCallRepository.save(pending);
-        }
+        const classified = parseToolName(pending.toolName);
+        if (!classified || classified.prefix !== 'mcp') continue;
+
+        const { toolResult } = await this.executeTool(
+          pending.toolUseId,
+          pending.toolName,
+          pending.params
+        );
+        pending.messageContext = {
+          type: 'tool_result',
+          tool_use_id: pending.toolUseId,
+          content: toolResult.content as string,
+        };
+        pending.status = 'completed';
+        pending.updatedOn = new Date();
+        pending.updatedBy = createdBy;
+        await this.pendingClientCallRepository.save(pending);
       }
 
       // Dispatch the first pending Client Tool (D6: serial dispatch).
@@ -663,19 +669,22 @@ export class SessionService {
     callId: string,
     res: Response
   ): Promise<boolean> {
-    const nextClientTool = await this.pendingClientCallRepository.findOne({
+    // Find the first pending row whose tool_name has the client__ prefix.
+    // (MCP rows are completed inline before this is called, so they're not
+    // status='pending' anymore — but we still filter by prefix to be explicit
+    // and handle unexpected ordering.)
+    const pending = await this.pendingClientCallRepository.find({
       where: { callId, status: 'pending' },
       order: { id: 'ASC' },
     });
 
+    const nextClientTool = pending.find((p) => {
+      const c = parseToolName(p.toolName);
+      return c !== null && c.prefix === 'client';
+    });
+
     if (!nextClientTool) {
       return false; // No more pending client tools
-    }
-
-    // Check if it's actually a client tool (prefix check)
-    const classified = parseToolName(`client__${nextClientTool.toolId}__${nextClientTool.toolName}`);
-    if (!classified || classified.prefix !== 'client') {
-      return false;
     }
 
     this.logger.log(
@@ -687,7 +696,7 @@ export class SessionService {
       `data: ${JSON.stringify({
         callId,
         toolUseId: nextClientTool.toolUseId,
-        toolName: `client__${nextClientTool.toolId}__${nextClientTool.toolName}`,
+        toolName: nextClientTool.toolName, // already full prefixed name
         params: nextClientTool.params ?? {},
       })}\n\n`
     );
@@ -696,8 +705,15 @@ export class SessionService {
   }
 
   /**
-   * Merge all completed tool results for the given call_id into one tool_result message (D2).
-   * Returns the array of tool_result blocks to append to the live messages context.
+   * Merge all completed tool results for the given call_id into one
+   * tool_result row (D2), persisted to t_message and pushed via SSE.
+   *
+   * Returns the array of tool_result blocks. Two callers, two usage modes:
+   *  - runLoop (MCP-only path): use the returned array to push onto the
+   *    live in-memory messages, since the loop does NOT re-read history.
+   *  - resumeClientResult: IGNORE the return value and re-read t_message via
+   *    reconstructNativeMessages — the persisted row appears there. Pushing
+   *    it again would duplicate the user turn (Anthropic 4xx).
    */
   private async mergeToolResults(
     callId: string,

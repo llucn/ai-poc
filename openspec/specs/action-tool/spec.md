@@ -1,113 +1,84 @@
-# action-tool Specification
-
-## Purpose
-TBD - created by archiving change action-tool. Update Purpose after archive.
-## Requirements
-### Requirement: LLM action output triggers MCP tool execution
-
-The system SHALL detect when the LLM emits a native Anthropic `tool_use` content block (response `stop_reason: "tool_use"`) and execute the referenced MCP tool, reading the tool name and parameters directly from the block's `name` and `input` fields. The system MUST NOT require a JSON envelope (`{"action": ...}`) and MUST NOT strip Markdown code fences or brace-match the model output. A final answer is the assistant's text content when `stop_reason` is `end_turn`.
-
-#### Scenario: LLM emits a tool_use block
-
-- **WHEN** the LLM response has `stop_reason: "tool_use"` with a block `{ id, name: "mcp__1__getWeather", input: { city: "Beijing" } }`
-- **THEN** the system parses `name` to extract the tool id and tool name and executes the MCP tool call with `input` as the parameters, without any JSON-string parsing step
-
-#### Scenario: LLM produces a final answer
-
-- **WHEN** the LLM response has `stop_reason: "end_turn"` with text "The weather is sunny."
-- **THEN** the system returns "The weather is sunny." as the assistant reply
-
-#### Scenario: Tool name does not match the routing format
-
-- **WHEN** a `tool_use` block's `name` does not match the `mcp__<id>__<name>` or `client__<id>__<name>` format
-- **THEN** the system constructs an error observation (`tool_result`) describing the invalid tool name and continues the loop
-
-### Requirement: Tool name parsing extracts agent tool ID and tool name
-
-The system SHALL parse the tool identifier from the native `tool_use` block's `name` field using the format `<prefix>__<id>__<toolName>`, where `prefix` is `mcp` or `client`, `id` is the numeric `t_tool` ID, and `toolName` is the tool name (which MAY itself contain underscores). The parser MUST split on exactly the first two `__` delimiters to correctly handle tool names containing underscores.
-
-#### Scenario: Parse standard tool name
-
-- **WHEN** the `tool_use.name` is `mcp__5__getWeatherForecastByLocation`
-- **THEN** the parsed prefix is `mcp`, the tool id is `5`, and the tool name is `getWeatherForecastByLocation`
-
-#### Scenario: Parse tool name with underscores
-
-- **WHEN** the `tool_use.name` is `mcp__12__get_user_profile`
-- **THEN** the parsed tool id is `12` and the tool name is `get_user_profile`
-
-#### Scenario: Invalid tool name format
-
-- **WHEN** the `tool_use.name` does not match the `<prefix>__<id>__<name>` format
-- **THEN** the system treats it as a parse error and returns an error `tool_result`
-
-### Requirement: MCP tool execution via JSON-RPC
-
-The system SHALL execute MCP tools by looking up the `server_url` from the `t_tool` table using the parsed tool ID, then sending a JSON-RPC `tools/call` request to that server URL with the tool name and the `tool_use` block's `input` as parameters. The system MUST use the existing MCP JSON-RPC client infrastructure (HTTP POST with `Content-Type: application/json`).
-
-#### Scenario: Successful tool execution
-
-- **WHEN** the system calls `tools/call` on the MCP server at `server_url` with the tool name and `input`
-- **THEN** the MCP server returns a result, and the system constructs a `tool_result` block carrying that result
-
-#### Scenario: Tool execution fails
-
-- **WHEN** the MCP server returns an error or the HTTP call fails
-- **THEN** the system constructs an error `tool_result` block carrying the failure detail so the LLM can handle it
-
-#### Scenario: Tool ID not found in database
-
-- **WHEN** the parsed tool ID does not exist in `t_tool`
-- **THEN** the system constructs an error `tool_result` indicating the tool was not found
+## MODIFIED Requirements
 
 ### Requirement: Observation messages are recorded as Thought Messages
 
-The system SHALL feed each tool result back to the LLM as a native Anthropic `tool_result` content block (role `user`) correlated to the originating call by `tool_use_id`, and SHALL also persist the result as a Thought Message (`isThought=1`, `userName='ASSISTANT'`) and stream it via a `thought_created` SSE event. The persisted Thought content MUST represent the observation result (success payload or error detail).
+The system SHALL feed each tool result back to the LLM as a native Anthropic `tool_result` content block (role `user`) correlated to the originating call by `tool_use_id`. When **all** tool calls of an assistant turn have completed (all MCP tools executed and all Client Tools returned), the system SHALL persist the complete set of `tool_result` blocks as a single Thought Message (`isThought=1`, `userName='ASSISTANT'`, `message_role='user'`, `native_content=[...tool_result]`) and stream it via one `thought_created` SSE event. The persisted Thought `content` field MUST contain a summary rendering of the results for UI display; the `native_content` field stores the complete array of `tool_result` blocks for LLM context reconstruction.
 
-#### Scenario: Observation saved and streamed
+#### Scenario: Multiple tool results merged into one Thought
 
-- **WHEN** an MCP tool execution completes (success or failure)
-- **THEN** the result is appended to the LLM context as a `tool_result` block keyed by the originating `tool_use_id`, persisted as a Thought Message with `isThought=1`, and pushed to the frontend as a `thought_created` SSE event
+- **WHEN** an assistant turn calls 3 tools (2 MCP, 1 Client), all complete successfully
+- **THEN** the system persists **one** Thought Message with `native_content` containing 3 `tool_result` blocks (keyed by their respective `tool_use_id`s), and pushes one `thought_created` SSE event
 
-#### Scenario: Observation rendered in chat UI
+#### Scenario: Tool result Thought participates in LLM context
 
-- **WHEN** the frontend receives a `thought_created` event for an observation message
-- **THEN** the message is displayed using the existing collapsible ThoughtMessage component
+- **WHEN** a subsequent user message triggers LLM context reconstruction from `t_message`
+- **THEN** the reconstructed `messages` array includes a user turn with `content: [...tool_result]` derived from the Thought's `native_content`, ensuring every prior `tool_use` has a matching `tool_result`
 
-#### Scenario: Tool failure becomes an error tool_result
+#### Scenario: Mixed success and failure results
 
-- **WHEN** the MCP server returns an error or the call fails
-- **THEN** the system builds a `tool_result` block marked as an error carrying the failure detail, so the LLM can react to it on the next turn
+- **WHEN** an assistant turn calls 2 tools, one succeeds (result `"OK"`), one fails (error `"Timeout"`)
+- **THEN** the merged Thought's `native_content` contains `[{type:'tool_result', tool_use_id:'A', content:'OK'}, {type:'tool_result', tool_use_id:'B', content:'Timeout', is_error:true}]`
 
 ### Requirement: Multi-turn tool calling loop until final_answer
 
-The system SHALL loop the LLM conversation after each tool result: appending the assistant's `tool_use` block and the corresponding `tool_result` block to the native message context, calling the Anthropic API again, and inspecting the new `stop_reason`. The loop MUST continue while the response is `tool_use` and MUST end when the response is `end_turn` (final answer) or an error. Each iteration MUST persist the assistant's thought (its text content, or a rendering of the `tool_use` when text is empty) as a Thought Message and stream it via SSE.
+The system SHALL enter a loop of (LLM call → tool execution → observation → repeat) until the LLM's `stop_reason` is `end_turn` or an error/limit is reached. Each iteration SHALL persist the assistant's thought (including any `tool_use` blocks) and the merged tool result Thought. The system SHALL support **multiple `tool_use` blocks per assistant turn** (parallel tool use), executing MCP tools server-side immediately and dispatching Client Tools serially (one `client_call` at a time). The loop resumes after all tool results of a turn are recorded.
 
-#### Scenario: Single tool call then final answer
+#### Scenario: Parallel tool use — multiple tools in one assistant turn
 
-- **WHEN** the LLM emits one `tool_use`, the tool executes, and the next response is `end_turn`
-- **THEN** the loop runs exactly one tool call, persists the observation, calls the API again, and returns the `end_turn` text as the assistant reply
+- **WHEN** the LLM's assistant turn contains `tool_use` blocks for `getWeather(Beijing)` and `getTime(UTC)`
+- **THEN** the system executes both MCP tools server-side, persists one assistant Thought with `native_content=[text?, tool_use(weather), tool_use(time)]`, waits for both results, then persists one user Thought with `native_content=[tool_result(weather), tool_result(time)]`, and continues the loop
 
-#### Scenario: Multiple consecutive tool calls
+#### Scenario: Mixed MCP and Client tools in one turn
 
-- **WHEN** the LLM emits a `tool_use`, the tool executes, the `tool_result` is returned, and the next response is another `tool_use`
-- **THEN** the loop continues: execute the second tool, persist the observation, call the API again, repeating until `end_turn`
+- **WHEN** the LLM calls `mcp__5__getWeather` and `client__7__select-users` in one turn
+- **THEN** the system executes the MCP tool immediately, persists one assistant Thought, sends one `client_call` for `select-users`, suspends the SSE; on resume, marks that client tool complete, merges both results into one user Thought, and continues the loop
 
-#### Scenario: SSE events during multi-turn loop
+#### Scenario: Serial Client Tool dispatch
 
-- **WHEN** the loop runs N tool calls before reaching the final answer
-- **THEN** the frontend receives `thought_created` events for each assistant thought and each observation (2N + 1 thought events total), followed by one `message_created` event for the final assistant reply
+- **WHEN** the LLM calls `client__7__select-users` and `client__8__pick-date` in one turn
+- **THEN** the system sends `client_call` for `select-users`, ends the SSE; on resume, sends `client_call` for `pick-date`, ends the SSE; on the second resume, merges both results and continues the loop
 
-### Requirement: Tool call count limit of 20
+#### Scenario: Loop continues after tool results merged
 
-The system SHALL enforce a maximum of 20 tool calls per single user message. If the loop reaches 20 `tool_use` rounds without producing an `end_turn` final answer, the system MUST terminate the loop and send an SSE `error` event indicating the tool call limit has been exceeded.
+- **WHEN** a turn's 2 tool calls complete and are merged into one user Thought
+- **THEN** the system calls the LLM again with the updated `messages` (including the merged `tool_result` user turn), producing the next assistant thought or final answer
 
-#### Scenario: Loop terminates at limit
+## ADDED Requirements
 
-- **WHEN** the LLM has emitted 20 consecutive `tool_use` rounds without an `end_turn`
-- **THEN** the system stops the loop and sends an SSE `error` event with message "Tool call limit exceeded (max 20 calls per message)"
+### Requirement: LLM context reconstruction from message_role and native_content
 
-#### Scenario: Loop completes within limit
+The system SHALL reconstruct the Anthropic `messages` array for LLM calls by querying all `t_message` rows for the session (ordered by `created_on`, `id` ascending), and for each row with non-null `native_content`, appending `{ role: message_role, content: native_content }`. Rows with null `native_content` (legacy) MUST fall back to `{ role: <inferred from userName>, content: <text> }`. The reconstruction MUST NOT filter on `is_thought` — every persisted `tool_use` and `tool_result` block re-enters the context, ensuring balanced pairing.
 
-- **WHEN** the LLM produces an `end_turn` final answer after 5 tool calls
-- **THEN** the loop completes normally with the final answer as the assistant reply
+#### Scenario: Tool blocks reconstructed regardless of is_thought
+
+- **WHEN** a session has 1 user text (is_thought=0), 1 assistant tool_use Thought (is_thought=1, native_content=[tool_use]), 1 user tool_result Thought (is_thought=1, native_content=[tool_result]), and 1 assistant final reply (is_thought=0)
+- **THEN** the reconstructed `messages` array contains 4 entries: user text, assistant [tool_use], user [tool_result], assistant text
+
+#### Scenario: Legacy text-only rows still participate
+
+- **WHEN** a session contains old rows with `native_content=NULL`
+- **THEN** the reconstruction includes those rows as `{ role: <inferred>, content: <content text> }`
+
+#### Scenario: Balanced tool_use and tool_result pairing
+
+- **WHEN** a session has recorded 3 assistant tool_use turns (each with `native_content`) and 3 corresponding user tool_result Thoughts
+- **THEN** the reconstructed `messages` array contains all 6 turns in alternating order (assistant tool_use, user tool_result, ...), and Anthropic accepts the request without `gateway.upstream_unavailable`
+
+### Requirement: One assistant tool_use turn persisted as one row
+
+When the LLM's `stop_reason` is `tool_use`, the system SHALL persist the complete assistant turn as **one** `t_message` row: `isThought=1`, `message_role='assistant'`, `native_content=<assistantContent>` (the full content array returned by Anthropic, containing any text blocks and all `tool_use` blocks). The `content` field MUST contain a UI-friendly rendering (assistant text if non-empty; otherwise a short summary like "Calling tools…"). The system SHALL push one `thought_created` SSE event for this row. No separate "observation" thought row is created for the tool_use itself.
+
+#### Scenario: Single tool call turn
+
+- **WHEN** the LLM produces `stop_reason: 'tool_use'` with `content: [{type:'text', text:'Let me check'}, {type:'tool_use', id:'toolu_A', name:'getWeather', input:{city:'Beijing'}}]`
+- **THEN** the system persists 1 row with `native_content` containing both blocks, `content='Let me check'`, `isThought=1`, and pushes 1 `thought_created` event
+
+#### Scenario: Multiple tool calls in one turn
+
+- **WHEN** the LLM produces 3 `tool_use` blocks in one assistant turn
+- **THEN** the system persists 1 row with `native_content=[...3 tool_use blocks]`, not 3 separate rows
+
+#### Scenario: Text-only assistant turn (no tool_use)
+
+- **WHEN** the LLM produces `stop_reason: 'end_turn'` with text content
+- **THEN** the system persists the assistant reply as `isThought=0` (regular message bubble), not a Thought

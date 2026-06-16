@@ -1,139 +1,96 @@
-## ADDED Requirements
-
-### Requirement: Client Tool 工具名称规范
-Client Tool 的名称 MUST 使用 `client__<toolId>__<toolName>` 格式（例如 `client__1__console-log-echo`），其中 toolId 是 t_tool 表的主键 id，toolName 是工具的实际名称（与 t_tool.mcp_schema 中的 name 对应）。服务端 MUST 通过 `client__` 前缀识别 Client Tool 类型，通过嵌入的 toolId 快速查表获取工具上下文（kind / schema / agentId）。
-
-#### Scenario: 解析 Client Tool 名称
-- **GIVEN** LLM 返回 action `{ tool: "client__1__console-log-echo", params: { message: "test" } }`
-- **WHEN** 服务端解析 tool 字段
-- **THEN** 识别前缀为 `client__`，提取 toolId=1，toolName="console-log-echo"
-
-#### Scenario: 区分 MCP Tool 和 Client Tool
-- **GIVEN** Agent 关联了 `mcp__2__weather` 和 `client__1__console-log-echo` 两个工具
-- **WHEN** 构建 LLM system content 的 available_tools 段
-- **THEN** 两个工具并列在列表中，前缀分别为 `mcp__` 和 `client__`
+## MODIFIED Requirements
 
 ### Requirement: 服务端挂起 LLM Loop
-当服务端收到 LLM 返回的 native `tool_use` block 且其 `name` 以 `client__` 开头时，服务端 MUST NOT 在服务端执行，而是 MUST 挂起当前 LLM Loop：写入 t_pending_client_call 表（callId 为 UUID，存储 sessionId / agentId / toolId / toolName / params / messageContext / status='pending'），通过 SSE 发送 `{ event: 'client_call', data: { callId, toolName, params } }` 消息，结束本次响应（不继续 LLM 对话）。其中 `messageContext` MUST 以 Anthropic native message blocks 形式存储挂起时的对话上下文，且 MUST 包含本次挂起 `tool_use` block 的 `id`（`tool_use_id`），以便恢复时回传正确关联的 `tool_result`。`params` 取自 `tool_use` block 的 `input`。
 
-#### Scenario: 识别 Client Tool 并挂起
-- **GIVEN** LLM 返回 native `tool_use` block `{ id: "toolu_x", name: "client__1__console-log-echo", input: { message: "test" } }`
-- **WHEN** 服务端发现 `name` 含 `client__` 前缀
-- **THEN** 在 t_pending_client_call 表插入一条记录（callId 为新生成的 UUID，status='pending'，messageContext 以 native blocks 存储当前对话且包含该 `tool_use` 的 `id`）
-- **AND** 通过 SSE 发送 `{ event: 'client_call', data: { callId: "<uuid>", toolName: "console-log-echo", params: { message: "test" } } }`
-- **AND** 结束本次 SSE 响应流
+当服务端收到 LLM 返回的 native `tool_use` block 且其 `name` 以 `client__` 开头时，服务端 MUST NOT 在服务端执行，而是 MUST 为该 tool_use 创建一条 `t_pending_client_call` 记录（使用本轮共享的 `callId`、该 tool_use 的 `tool_use_id`、工具参数、status='pending'、`message_context=null`），通过 SSE 发送 `{ event: 'client_call', data: { callId, toolUseId, toolName, params } }` 消息（注意新增 `toolUseId` 字段），结束本次响应。若本轮有多个 Client Tool，服务端 MUST **串行派发**：仅发送第一个 Client Tool 的 `client_call`，关闭 SSE；后续 Client Tool 在前一个的结果回传并恢复后再发送。
 
-#### Scenario: 挂起状态持久化
-- **GIVEN** 服务端挂起了一个 Client Tool 调用
-- **WHEN** 服务进程重启
-- **THEN** t_pending_client_call 表中的 pending 记录仍然存在，callId 与其中存储的 `tool_use_id` 可用于后续恢复
+#### Scenario: 单个 Client Tool 挂起
+
+- **WHEN** LLM 返回 `stop_reason: 'tool_use'` 包含 1 个 `client__7__select-users` tool_use
+- **THEN** t_pending_client_call 表中插入 1 条记录（callId 为新生成的 UUID，toolUseId 为该 tool_use 的 id，status='pending'，message_context=null），SSE 推送 `{ event: 'client_call', data: { callId, toolUseId, toolName: 'client__7__select-users', params: {...} } }`，服务端结束响应
+
+#### Scenario: 多个 Client Tool 串行派发
+
+- **WHEN** LLM 返回 1 个 assistant turn 包含 2 个 Client Tool: `client__7__select-users` 和 `client__8__pick-date`
+- **THEN** t_pending_client_call 表中插入 2 条记录（共享相同 callId，各自 toolUseId 不同，均 status='pending'），SSE 仅推送第一个 `client_call`（select-users），服务端结束响应；当第一个结果回传恢复时，检查该 callId 还有 1 个 pending，再推送第二个 `client_call`（pick-date）
+
+#### Scenario: 混合 MCP 和 Client Tool
+
+- **WHEN** LLM 返回 1 个 assistant turn 包含 1 个 MCP tool `mcp__5__getWeather` 和 1 个 Client Tool `client__7__select-users`
+- **THEN** 服务端立即执行 MCP 工具，将结果写入对应 pending 行的 message_context（`{type:'tool_result', tool_use_id, content}`）和 status='completed'；为 Client Tool 创建 pending 行，推送 `client_call`，结束响应
 
 ### Requirement: 浏览器端接收并派发工具调用
-浏览器 MUST 监听 SSE 消息，当接收到 `event: 'client_call'` 时，提取 `{ callId, toolName, params }`，派发到 ClientToolExecutor 模块。Executor MUST 根据 toolName 查找对应的实现函数（从注册表 `Map<toolName, executorFunction>` 中获取），执行工具并捕获结果（成功 → { result } 或失败 → { error }）。
 
-#### Scenario: 接收 client_call 事件
-- **GIVEN** 浏览器已连接 SSE 流
-- **WHEN** 接收到 `{ event: 'client_call', data: { callId: "abc-123", toolName: "console-log-echo", params: { message: "test" } } }`
-- **THEN** useChatSse Hook 触发 onClientCall 回调，传递 callId / toolName / params
+浏览器端 MUST 监听 SSE 流中的 `client_call` 事件，解析 `{ callId, toolUseId, toolName, params }` 载荷（注意新增 `toolUseId` 字段），根据 `toolName` 查找并执行对应的 Client Tool 实现，获取执行结果后，通过 `POST /sessions/:id/client-result` 回传 `{ callId, toolUseId, result? , error? }`。
 
-#### Scenario: 派发到 Executor 并执行
-- **GIVEN** ClientToolExecutor 注册了 `console-log-echo` 工具实现函数
-- **WHEN** Executor 接收到 toolName="console-log-echo" 的调用
-- **THEN** 查找并执行对应函数（执行 `console.log(params.message)`，返回 `{ echo: params.message, timestamp: Date.now() }`）
+#### Scenario: 收到 client_call 执行工具
 
-#### Scenario: 工具执行成功
-- **GIVEN** 工具实现函数返回结果对象 `{ echo: "test", timestamp: 1718000000000 }`
-- **THEN** Executor 包装为 `{ result: { echo: "test", timestamp: 1718000000000 } }`
+- **WHEN** SSE 推送 `{ event: 'client_call', data: { callId: 'uuid-123', toolUseId: 'toolu_A', toolName: 'client__7__select-users', params: {filter: 'active'} } }`
+- **THEN** 浏览器找到 `select-users` 工具实现，执行后 POST `/sessions/:id/client-result` body `{ callId: 'uuid-123', toolUseId: 'toolu_A', result: {userId: 42, userName: 'Alice'} }`
 
-#### Scenario: 工具执行失败
-- **GIVEN** 工具实现函数抛出异常 `Error("Tool execution failed")`
-- **THEN** Executor 捕获异常并包装为 `{ error: "Tool execution failed" }`
+#### Scenario: 工具执行失败回传错误
+
+- **WHEN** Client Tool 执行中抛出异常 "User cancelled"
+- **THEN** 浏览器 POST `{ callId, toolUseId, error: 'User cancelled' }`
 
 ### Requirement: 浏览器端回传工具结果
-工具执行完成后，浏览器 MUST 通过 `POST /sessions/:sessionId/client-result` 端点回传结果，请求体为 `{ callId, result }` 或 `{ callId, error }`。服务端接收到回传后，MUST 从 t_pending_client_call 表中查找对应的 pending 记录（通过 callId），验证 status='pending'（幂等性检查），提取 messageContext，调用 resumeClientResult 恢复 LLM Loop。
 
-#### Scenario: 回传成功结果
-- **GIVEN** 浏览器执行工具成功，得到 `{ result: { echo: "test", timestamp: 1718000000000 } }`
-- **WHEN** POST 到 `/sessions/123/client-result`，body 为 `{ callId: "abc-123", result: { echo: "test", timestamp: 1718000000000 } }`
-- **THEN** 服务端接收请求，查找 t_pending_client_call 表中 callId="abc-123" 的记录，验证 status='pending'，提取 messageContext
+浏览器端在执行完 Client Tool 后 MUST 通过 `POST /sessions/:id/client-result` 将结果回传给服务端，请求体 MUST 包含 `callId`（用于定位本轮调用）、`toolUseId`（用于定位具体的 tool_use）、以及 `result`（成功时）或 `error`（失败时）。浏览器 MUST 立即建立新的 SSE 连接监听恢复后的消息流。
 
-#### Scenario: 回传错误结果
-- **GIVEN** 浏览器执行工具失败，得到 `{ error: "Tool execution failed" }`
-- **WHEN** POST 到 `/sessions/123/client-result`，body 为 `{ callId: "abc-123", error: "Tool execution failed" }`
-- **THEN** 服务端接收请求，提取 error 字段
+#### Scenario: 成功结果回传
 
-#### Scenario: 幂等性检查
-- **GIVEN** t_pending_client_call 表中 callId="abc-123" 的记录 status 已被标记为 'completed'
-- **WHEN** 浏览器重复 POST `/sessions/123/client-result` 同一 callId
-- **THEN** 服务端返回 200 但不执行恢复逻辑（已处理），避免重复恢复
+- **WHEN** 浏览器成功执行 `select-users` 工具，返回 `{userId: 42}`
+- **THEN** POST body 为 `{ callId: 'uuid-123', toolUseId: 'toolu_A', result: {userId: 42} }`
+
+#### Scenario: 失败结果回传
+
+- **WHEN** 用户取消工具执行
+- **THEN** POST body 为 `{ callId: 'uuid-123', toolUseId: 'toolu_A', error: 'Cancelled by user' }`
 
 ### Requirement: 服务端恢复 LLM Loop
-接收到浏览器回传的结果后，服务端 MUST 通过 resumeClientResult 方法恢复挂起的 LLM Loop：从 t_pending_client_call 加载 messageContext（native message blocks），追加一个 native `tool_result` block（`tool_use_id` 取自挂起记录中保存的 id，`content` 为工具返回的 result 或 error），更新 t_pending_client_call 的 status 为 'completed'，继续调用 Anthropic API（将更新后的 messages 发送给 LLM），循环直到返回 `end_turn`（final answer）或再次挂起。
 
-#### Scenario: 恢复并拼接 tool_result
-- **GIVEN** t_pending_client_call 记录中 messageContext 为包含一个 assistant `tool_use` block（id="toolu_x"）的 native message 数组
-- **AND** 浏览器回传 `{ result: { echo: "test", timestamp: 1718000000000 } }`
-- **WHEN** 服务端调用 resumeClientResult
-- **THEN** 追加一个 `{ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_x', content: '{"echo":"test","timestamp":1718000000000}' }] }` 到 messages 数组末尾
-- **AND** 将更新后的 messages 发送给 Anthropic API
+接收到浏览器回传的结果后，服务端 MUST 通过 `(callId, toolUseId)` 定位对应的 `t_pending_client_call` 记录。若该记录 status 已非 'pending'，视为重复请求，响应幂等（推送 `done` 事件，结束 SSE）。否则将结果写入该记录的 `message_context`（成功时为 `{type:'tool_result', tool_use_id, content: result}`，失败时为 `{error}`）和 status='completed'，更新 updatedOn/updatedBy。然后查询该 `callId` 的所有 pending 记录：若还有 status='pending' 的 Client Tool，推送下一个 `client_call`，结束 SSE；若全部完成，从所有记录的 `message_context` 合并构建一个 user turn `tool_result` 消息（`native_content=[...tool_result]`，每个 tool_result 的 `tool_use_id` 来自记录、`content` 来自 message_context；错误记录映射为 `{type:'tool_result', tool_use_id, content: <error>, is_error:true}`），持久化为 `isThought=1`、`message_role='user'` 的 Thought Message，推送 `thought_created` 事件，从 `t_message` 重建完整对话上下文（调用 `reconstructNativeMessages`），继续调用 Anthropic API 进入下一轮循环，直到返回 `end_turn`（final answer）。
 
-#### Scenario: 回传错误结果拼接为 error tool_result
-- **GIVEN** 浏览器回传 `{ error: "Tool execution failed" }`
-- **WHEN** 服务端调用 resumeClientResult
-- **THEN** 追加一个标记为错误（`is_error: true`）的 `tool_result` block，`tool_use_id` 关联挂起记录中的 id，`content` 携带错误信息
+#### Scenario: 单个 Client Tool 结果恢复
 
-#### Scenario: 恢复后继续 Loop
-- **GIVEN** LLM 接收到包含 `tool_result` 的 messages
-- **WHEN** LLM 返回新的响应（可能是 `end_turn` 或新的 `tool_use`）
-- **THEN** 服务端继续 Loop 逻辑（如 `end_turn` 则结束并输出 final answer，如新 `tool_use` 则再次分发）
+- **WHEN** POST `/client-result` body `{ callId: 'uuid-123', toolUseId: 'toolu_A', result: {userId: 42} }`，该 callId 只有 1 条 pending 记录
+- **THEN** 更新该记录 message_context=`{type:'tool_result', tool_use_id:'toolu_A', content:'{\"userId\":42}'}` 和 status='completed'，查询该 callId 无其他 pending，合并构建 1 个 user Thought（native_content=`[{type:'tool_result', tool_use_id:'toolu_A', content:'{\"userId\":42}'}]`），推送 `thought_created`，从 t_message 重建上下文，继续调用 LLM
 
-#### Scenario: 标记 pending 记录为 completed
-- **GIVEN** resumeClientResult 成功恢复并继续了 Loop
-- **THEN** t_pending_client_call 表中对应记录的 status 更新为 'completed'
-- **AND** 后续同一 callId 的回传请求被识别为重复并忽略
+#### Scenario: 多 Client Tool 中的第一个返回
+
+- **WHEN** callId='uuid-456' 有 2 条 pending（toolUseId='toolu_A' 和 'toolu_B'），收到 toolu_A 的结果
+- **THEN** 更新 toolu_A 记录为 completed，查询发现 toolu_B 仍 pending，推送 `{ event: 'client_call', data: { callId: 'uuid-456', toolUseId: 'toolu_B', ... } }`，结束 SSE（不合并，不继续循环）
+
+#### Scenario: 多 Client Tool 的最后一个返回
+
+- **WHEN** callId='uuid-456' 的 toolu_A 已 completed，收到 toolu_B 的结果
+- **THEN** 更新 toolu_B 为 completed，查询无 pending，合并 2 个 tool_result 到 1 个 user Thought，推送 `thought_created`，重建上下文，继续 LLM 循环
+
+#### Scenario: 混合 MCP 和 Client Tool 结果合并
+
+- **WHEN** 1 个 assistant turn 调用了 mcp__5__getWeather（已在挂起时执行并写入 completed）和 client__7__select-users（pending），收到 client 结果
+- **THEN** 更新 client 记录为 completed，查询该 callId 的 2 条记录（1 MCP completed、1 Client completed），合并 2 个 tool_result 到 1 个 user Thought，继续循环
+
+#### Scenario: 错误结果合并时标记 is_error
+
+- **WHEN** callId 有 2 个工具，1 个成功 result='OK'，1 个失败 error='Timeout'
+- **THEN** 合并后的 user Thought 的 native_content=`[{type:'tool_result', tool_use_id:'A', content:'OK'}, {type:'tool_result', tool_use_id:'B', content:'Timeout', is_error:true}]`
 
 ### Requirement: t_pending_client_call 表设计
-系统 MUST 新增 t_pending_client_call 表，字段包括：
-- `id` INT AUTO_INCREMENT PRIMARY KEY
-- `call_id` VARCHAR(255) NOT NULL UNIQUE（UUID，客户端回传结果时的幂等 Key）
-- `session_id` INT NOT NULL（关联 t_session）
-- `agent_id` INT NOT NULL（关联 t_agent）
-- `tool_id` INT NOT NULL（关联 t_tool）
-- `tool_name` VARCHAR(255) NOT NULL（Client Tool 的实际工具名，如 "console-log-echo"）
-- `params` JSON NULL（工具参数）
-- `message_context` JSON NOT NULL（挂起时的 LLM messages 数组）
-- `status` VARCHAR(16) NOT NULL DEFAULT 'pending'（'pending' / 'completed' / 'failed' / 'timeout'）
-- `created_on` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-- `created_by` VARCHAR(255) NOT NULL
-- `updated_on` TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP
-- `updated_by` VARCHAR(255) NULL
 
-索引：call_id UNIQUE，session_id，status。
+表 MUST 包含以下列：`id` (PK)、`call_id` (VARCHAR 非空，与 tool_use_id 组成复合唯一索引)、`session_id` (INT 非空)、`agent_id` (INT 非空)、`tool_id` (INT 非空)、`tool_name` (VARCHAR 非空)、`tool_use_id` (VARCHAR 非空，与 call_id 组成复合唯一索引)、`params` (JSON 可空)、`message_context` (JSON 可空，pending 时为 null；completed 时为单个 tool_result 对象 `{type:'tool_result', tool_use_id, content}` 或错误对象 `{error}`)、`status` (VARCHAR 16 非空 默认 'pending')、`created_on` / `created_by` / `updated_on` / `updated_by`。索引：`UNIQUE (call_id, tool_use_id)`、`INDEX (session_id)`、`INDEX (status)`。
 
-#### Scenario: 插入挂起记录
-- **WHEN** 服务端挂起一个 Client Tool 调用
-- **THEN** 在 t_pending_client_call 表插入一条记录，call_id 为新生成的 UUID，status='pending'，message_context 存储当前 messages JSON 数组
+#### Scenario: 复合唯一索引允许多条相同 call_id 记录
 
-#### Scenario: 通过 call_id 查找记录
-- **GIVEN** 浏览器回传 callId="abc-123"
-- **WHEN** 服务端查询 t_pending_client_call 表
-- **THEN** 通过 call_id 索引快速定位记录（O(1)）
+- **WHEN** 1 个 assistant turn 产生 2 个 Client Tool（callId='uuid-789'，toolUseId='toolu_X' 和 'toolu_Y'）
+- **THEN** t_pending_client_call 表插入 2 条记录，均 call_id='uuid-789'，各自 tool_use_id 不同，复合唯一约束 (call_id, tool_use_id) 不冲突
 
-#### Scenario: 更新 status 为 completed
-- **WHEN** resumeLlmTurn 成功恢复并处理完 observation
-- **THEN** 更新对应记录的 status='completed'，updated_on=当前时间
+#### Scenario: message_context 为单个 tool_result 对象
 
-### Requirement: 测试工具 console-log-echo 实现
-系统 MUST 实现一个测试用的 Client Tool `client__1__console-log-echo`（假设 toolId=1），功能为：接收参数 `{ message: string }`，在浏览器控制台执行 `console.log(params.message)`，异步返回演示对象 `{ echo: params.message, timestamp: Date.now() }`。此工具用于验证端到端 suspend/resume 流程。
+- **WHEN** MCP 工具执行完成，结果为 `{temp: 25}`
+- **THEN** 该记录的 message_context=`{type:'tool_result', tool_use_id:'toolu_abc', content:'{\"temp\":25}'}`（非整个对话数组）
 
-#### Scenario: 执行 console-log-echo 工具
-- **GIVEN** 浏览器接收到 toolName="console-log-echo"，params=`{ message: "echo test" }`
-- **WHEN** ClientToolExecutor 执行工具
-- **THEN** 浏览器控制台输出 "echo test"
-- **AND** 返回结果 `{ result: { echo: "echo test", timestamp: 1718000000000 } }`
+#### Scenario: 错误记录的 message_context
 
-#### Scenario: LLM 调用 console-log-echo 并收到结果
-- **GIVEN** LLM 返回 action `{ tool: "client__1__console-log-echo", params: { message: "test message" } }`
-- **WHEN** 服务端挂起 → 浏览器执行 → 回传结果 → 服务端恢复
-- **THEN** LLM 收到 observation `{"echo":"test message","timestamp":1718000000000}`
-- **AND** 基于此结果生成 final_answer 或后续 action
+- **WHEN** Client Tool 执行失败，error='Network timeout'
+- **THEN** 该记录的 message_context=`{error: 'Network timeout'}`，后续合并时映射为 `{type:'tool_result', tool_use_id, content:'Network timeout', is_error:true}`

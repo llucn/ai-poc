@@ -67,6 +67,18 @@ export function getAllClientTools(): Array<{
 }
 
 /**
+ * Strip the `client__<id>__` prefix from a tool name. The server passes the
+ * full prefixed name (e.g. `client__3__select-users`) over SSE so it can
+ * route results back to the right pending row, but the registry is keyed by
+ * the bare tool name (`select-users`). Returns the input unchanged if it
+ * doesn't match the prefix pattern, so already-bare names still work.
+ */
+function stripClientPrefix(toolName: string): string {
+  const m = /^client__\d+__(.+)$/.exec(toolName);
+  return m ? m[1] : toolName;
+}
+
+/**
  * Execute a client tool by name, capturing success/failure into a uniform
  * outcome the caller posts back to the server. Never throws.
  */
@@ -74,7 +86,8 @@ export async function executeClientTool(
   toolName: string,
   params: unknown
 ): Promise<ClientToolOutcome> {
-  const entry = registry.get(toolName);
+  const bareName = stripClientPrefix(toolName);
+  const entry = registry.get(bareName);
   if (!entry) {
     return { error: `No client tool registered for "${toolName}"` };
   }

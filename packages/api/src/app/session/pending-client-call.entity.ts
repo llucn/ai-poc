@@ -1,4 +1,4 @@
-import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, PrimaryGeneratedColumn, Index } from 'typeorm';
 
 // Status of a suspended Client Tool call.
 export type PendingClientCallStatus =
@@ -7,26 +7,38 @@ export type PendingClientCallStatus =
   | 'failed'
   | 'timeout';
 
-// One LLM message captured in the suspended context (system / user / assistant).
-export interface LlmMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
+/**
+ * Single tool result object stored in message_context.
+ * Success: {type:'tool_result', tool_use_id, content}
+ * Failure: {error: string}
+ */
+export type PendingToolResult =
+  | { type: 'tool_result'; tool_use_id: string; content: string }
+  | { error: string };
 
-// A suspended Client Tool call awaiting browser execution. Created when the LLM
-// loop emits an action whose tool name starts with `client__`; the server
-// persists the suspended LLM context here, pushes a `client_call` SSE event,
-// and ends the request. On result POST the row is loaded and the loop resumes.
-//
-// call_id (UUID) is the idempotency key; message_context holds the LLM messages
-// array captured at suspend time. No DB foreign keys — referential integrity is
-// enforced in the application layer (consistent with the other tables).
+// A suspended Client Tool call awaiting browser execution. Created when the
+// Anthropic response carries a `tool_use` block whose name starts with
+// `client__`; the server persists the suspended message context here, pushes
+// a `client_call` SSE event, and ends the request. On result POST the row is
+// loaded and the loop resumes by appending a `tool_result` block keyed by the
+// saved `tool_use_id`.
+/**
+ * Records a Client Tool call suspended mid-loop, waiting for browser execution.
+ * One assistant turn with multiple tool_use blocks creates multiple rows sharing
+ * the same call_id, each with its own tool_use_id. Uniqueness is enforced on
+ * the composite (call_id, tool_use_id).
+ */
 @Entity({ name: 't_pending_client_call' })
+@Index('idx_pending_call_tooluse', ['callId', 'toolUseId'], { unique: true })
+@Index('idx_pending_call_id', ['callId'])
+@Index('idx_pending_status', ['status'])
 export class PendingClientCallEntity {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @Column({ name: 'call_id', type: 'varchar', length: 255, unique: true })
+  // Grouping key: multiple tool_use blocks in one assistant turn share this call_id.
+  // Composite unique with tool_use_id.
+  @Column({ name: 'call_id', type: 'varchar', length: 255 })
   callId!: string;
 
   @Column({ name: 'session_id', type: 'int' })
@@ -41,11 +53,16 @@ export class PendingClientCallEntity {
   @Column({ name: 'tool_name', type: 'varchar', length: 255 })
   toolName!: string;
 
+  @Column({ name: 'tool_use_id', type: 'varchar', length: 255 })
+  toolUseId!: string;
+
   @Column({ name: 'params', type: 'json', nullable: true })
   params!: unknown | null;
 
-  @Column({ name: 'message_context', type: 'json' })
-  messageContext!: LlmMessage[];
+  // Single tool result object: {type:'tool_result', tool_use_id, content} or {error}.
+  // NULL while pending; written when the tool completes (MCP immediate, Client on resume).
+  @Column({ name: 'message_context', type: 'json', nullable: true })
+  messageContext!: PendingToolResult | null;
 
   @Column({ name: 'status', type: 'varchar', length: 16, default: 'pending' })
   status!: PendingClientCallStatus;

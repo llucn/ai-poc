@@ -17,6 +17,8 @@ export interface Message {
   // 1 = thought (collapsible note), 0 = regular message
   isThought: number;
   content: string | null;
+  nativeContent?: any; // Anthropic ContentBlockParam[] for expandable view
+  messageRole?: string; // 'user' | 'assistant'
   createdOn: string;
   createdBy: string;
   updatedOn?: string | null;

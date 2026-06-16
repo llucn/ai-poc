@@ -1,4 +1,10 @@
-import { faPaperPlane, faRobot } from '@fortawesome/free-solid-svg-icons';
+import {
+  faPaperPlane,
+  faRobot,
+  faChevronDown,
+  faChevronUp,
+  faLightbulb,
+} from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import MarkdownPreview from '@uiw/react-markdown-preview';
@@ -9,7 +15,7 @@ import { useUser } from '../../contexts/UserContext';
 import { executeClientTool } from './client-tool-executor';
 import { clearToolArea } from './tool-area-bridge';
 import { ToolArea } from './tool-area';
-import { ThoughtMessage } from './thought-message';
+import { NativeContentView } from './native-content';
 import type { Message, Session } from './types';
 
 const THINKING_ID = -1;
@@ -19,6 +25,109 @@ const THINKING_ID = -1;
 // React children with the same key) once a second message is sent. The real
 // persisted user message is loaded next time the session is reopened.
 const FIRST_PENDING_USER_ID = -2;
+
+/**
+ * Renders one chat message.
+ *
+ * - is_thought=0 (regular message): a bubble showing `content`. If the message
+ *   has native_content, the `content` text is clickable to expand/collapse the
+ *   structured native view. New messages auto-expand (defaultExpanded).
+ * - is_thought=1 (thought / tool turn): a bubble showing `content` with a
+ *   fold/expand chevron at the top-right; clicking it reveals native_content.
+ */
+function MessageItem({
+  msg,
+  isAssistant,
+  initials,
+  defaultExpanded,
+}: {
+  msg: Message;
+  isAssistant: boolean;
+  initials: string;
+  defaultExpanded: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  // Keep in sync when auto-expand state changes (e.g. a newer message arrives).
+  useEffect(() => {
+    setExpanded(defaultExpanded);
+  }, [defaultExpanded]);
+
+  const blocks = Array.isArray(msg.nativeContent)
+    ? msg.nativeContent
+    : msg.nativeContent
+    ? [msg.nativeContent]
+    : [];
+  const hasNative = blocks.length > 0;
+
+  if (msg.isThought === 1) {
+    // Thought bubble: content + bottom-left fold/expand icon (same layout as
+    // regular messages).
+    return (
+      <div className="chat-message chat-message-assistant chat-message-thought">
+        <div className="chat-avatar chat-avatar-assistant chat-avatar-thought">
+          <FontAwesomeIcon icon={faLightbulb} />
+        </div>
+        <div className="chat-bubble chat-bubble-assistant chat-bubble-thought">
+          <div className="chat-bubble-head">
+            <div className="chat-bubble-content chat-bubble-thought-title">
+              {msg.content ?? ''}
+            </div>
+            {hasNative && (
+              <button
+                type="button"
+                className="chat-native-toggle"
+                aria-expanded={expanded}
+                aria-label={expanded ? 'Collapse details' : 'Expand details'}
+                onClick={() => setExpanded((v) => !v)}
+              >
+                <FontAwesomeIcon icon={expanded ? faChevronUp : faChevronDown} />
+              </button>
+            )}
+          </div>
+          {hasNative && expanded && <NativeContentView blocks={blocks} />}
+        </div>
+      </div>
+    );
+  }
+
+  // Regular message bubble.
+  return (
+    <div
+      className={`chat-message ${isAssistant ? 'chat-message-assistant' : 'chat-message-user'}`}
+    >
+      <div
+        className={`chat-avatar ${isAssistant ? 'chat-avatar-assistant' : 'chat-avatar-user'}`}
+      >
+        {isAssistant ? <FontAwesomeIcon icon={faRobot} /> : <span>{initials}</span>}
+      </div>
+      <div
+        className={`chat-bubble ${isAssistant ? 'chat-bubble-assistant' : 'chat-bubble-user'}`}
+      >
+        <div className="chat-bubble-head">
+          <div className="chat-bubble-content">
+            <MarkdownPreview
+              source={msg.content || ''}
+              style={{ background: 'transparent', padding: 0, fontSize: '13px' }}
+            />
+          </div>
+          {hasNative && (
+            <button
+              type="button"
+              className="chat-native-toggle"
+              aria-expanded={expanded}
+              aria-label={expanded ? 'Collapse details' : 'Expand details'}
+              onClick={() => setExpanded((v) => !v)}
+            >
+              <FontAwesomeIcon icon={expanded ? faChevronUp : faChevronDown} />
+            </button>
+          )}
+        </div>
+        {hasNative && expanded && <NativeContentView blocks={blocks} />}
+      </div>
+    </div>
+  );
+}
 
 export function ChatPage() {
   const { id: idParam } = useParams<{ id: string }>();
@@ -310,43 +419,18 @@ export function ChatPage() {
               </div>
             );
           }
-          // Thought messages render as a collapsible note
-          if (msg.isThought === 1) {
-            // A thought should only be expanded if there are NO messages after it
-            // (i.e., it's the last message in the list, regardless of type)
-            const isLastMessage = index === messages.length - 1;
-            return (
-              <ThoughtMessage
-                key={msg.id}
-                content={msg.content}
-                defaultExpanded={isLastMessage}
-              />
-            );
-          }
           const isAssistant = msg.userName === 'ASSISTANT';
+          // Auto-expand native_content only when this is the last message
+          // (newest); older messages collapse as the conversation grows.
+          const isLastMessage = index === messages.length - 1;
           return (
-            <div
+            <MessageItem
               key={msg.id}
-              className={`chat-message ${isAssistant ? 'chat-message-assistant' : 'chat-message-user'}`}
-            >
-              <div
-                className={`chat-avatar ${isAssistant ? 'chat-avatar-assistant' : 'chat-avatar-user'}`}
-              >
-                {isAssistant ? (
-                  <FontAwesomeIcon icon={faRobot} />
-                ) : (
-                  <span>{getInitials()}</span>
-                )}
-              </div>
-              <div
-                className={`chat-bubble ${isAssistant ? 'chat-bubble-assistant' : 'chat-bubble-user'}`}
-              >
-                <MarkdownPreview
-                  source={msg.content || ''}
-                  style={{ background: 'transparent', padding: 0, fontSize: '13px' }}
-                />
-              </div>
-            </div>
+              msg={msg}
+              isAssistant={isAssistant}
+              initials={getInitials()}
+              defaultExpanded={isLastMessage}
+            />
           );
         })}
 

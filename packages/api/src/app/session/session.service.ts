@@ -38,7 +38,6 @@ import {
   createToolResultsMessage,
 } from './message-native.helper';
 
-const ASSISTANT_USER = 'ASSISTANT';
 const MAX_TOOL_CALLS = 20;
 
 /**
@@ -526,27 +525,14 @@ export class SessionService {
 
       // Step 2: dispatch on turn kind
       if (turn.kind === 'final' || turn.kind === 'error') {
-        // Persist thought (the text the model emitted before finalizing)
-        const thoughtText = turn.kind === 'final' ? turn.text : null;
-        if (thoughtText) {
-          const thoughtMessage = this.messageRepository.create({
-            sessionId,
-            userName: ASSISTANT_USER,
-            messageType: 1,
-            isThought: 1,
-            content: thoughtText,
-            createdOn: new Date(now.getTime() + timestampOffset++),
-            createdBy: `assistant/${createdBy}`,
-          });
-          const savedThoughtMsg = await this.messageRepository.save(thoughtMessage);
-          res.write(`event: thought_created\n`);
-          res.write(`data: ${JSON.stringify(savedThoughtMsg)}\n\n`);
-        }
-
         if (turn.kind === 'error') {
           res.write(`event: error\n`);
           res.write(`data: ${JSON.stringify({ message: turn.message })}\n\n`);
         }
+        // For end_turn, the assistant text IS the final answer; persist it as
+        // a single regular assistant message (is_thought=0). No separate
+        // thought row — that would duplicate the same text in t_message and
+        // in the reconstructed LLM context.
         const replyContent = turn.kind === 'final' ? turn.text : `Error: ${turn.message}`;
         const assistantMessage = this.messageRepository.create({
           ...createAssistantMessage(sessionId, replyContent, `assistant/${createdBy}`),

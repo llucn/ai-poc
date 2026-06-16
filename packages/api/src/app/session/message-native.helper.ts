@@ -14,11 +14,14 @@ const ASSISTANT_USER = 'ASSISTANT';
  *
  * Strategy (D1 - context reconstruction):
  * 1. If a row has `nativeContent`, use it directly (preserves tool blocks)
- * 2. If `nativeContent` is NULL (legacy row), fallback to text-only content
- * 3. DO NOT filter by `isThought` - that flag is UI-only (fold/expand control)
+ * 2. If `nativeContent` is NULL but it's a regular message (is_thought=0),
+ *    fall back to text-only content (legacy rows)
+ * 3. Skip thought rows (is_thought=1) that have no nativeContent — these are
+ *    UI-only artifacts and carry no API-relevant content
  *
- * This ensures every tool_use and tool_result block re-enters the context,
- * fixing the "gateway.upstream_unavailable" bug caused by unbalanced pairing.
+ * Context membership is driven by `nativeContent` + `messageRole`, never by
+ * `is_thought` alone (that flag is a UI fold control). This keeps every
+ * tool_use / tool_result pair balanced.
  */
 export function reconstructNativeMessages(rows: MessageEntity[]): MessageParam[] {
   const messages: MessageParam[] = [];
@@ -34,49 +37,33 @@ export function reconstructNativeMessages(rows: MessageEntity[]): MessageParam[]
         role,
         content: row.nativeContent as ContentBlockParam[],
       });
-    } else if (row.content) {
-      // Legacy row - fallback to text-only
+    } else if (row.isThought !== 1 && row.content) {
+      // Legacy regular message - fallback to text-only. Thought rows without
+      // nativeContent are UI-only and must not enter the context.
       messages.push({
         role,
         content: row.content,
       });
     }
-    // Skip rows with neither nativeContent nor content (shouldn't exist)
   }
 
   return messages;
 }
 
 /**
- * Render native content blocks to display text for the UI.
- * This generates the `content` field value for MessageEntity.
- *
- * Examples:
- * - [text] → the text
- * - [text, tool_use] → the text (tool_use rendered separately as thought)
- * - [tool_result] → "{observation: ...}" (for UI compatibility)
+ * Render the text blocks of a native content array into a display string for
+ * the `content` field. Non-text blocks (tool_use / tool_result) are ignored —
+ * they live in `nativeContent` and are rendered by the UI on expand.
  */
 export function renderContentForDisplay(
-  content: ContentBlockParam[],
-  isToolResultOnly: boolean = false
+  content: ContentBlockParam[]
 ): string {
-  if (isToolResultOnly) {
-    // Tool result messages use the observation envelope for UI compatibility
-    const toolResult = content.find((b) => b.type === 'tool_result');
-    if (toolResult && 'content' in toolResult) {
-      return JSON.stringify({ observation: toolResult.content });
-    }
-    return '';
-  }
-
-  // Extract all text blocks
   const textParts: string[] = [];
   for (const block of content) {
     if (block.type === 'text' && 'text' in block) {
       textParts.push(block.text);
     }
   }
-
   return textParts.join('');
 }
 
@@ -133,7 +120,7 @@ export function createAssistantToolUseMessage(
   assistantContent: ContentBlockParam[],
   createdBy: string
 ): Partial<MessageEntity> {
-  const displayText = renderContentForDisplay(assistantContent, false);
+  const displayText = renderContentForDisplay(assistantContent);
 
   return {
     sessionId,
@@ -159,15 +146,12 @@ export function createToolResultsMessage(
   toolResults: ContentBlockParam[],
   createdBy: string
 ): Partial<MessageEntity> {
-  // For UI, render a summary of all results
-  const displayContent = renderContentForDisplay(toolResults, true);
-
   return {
     sessionId,
     userName: ASSISTANT_USER, // Internal message, not user-authored
     messageType: 1,
     isThought: 1, // Fold in UI (not a regular message bubble)
-    content: displayContent,
+    content: 'Tool Result', // Fixed label; details live in nativeContent
     nativeContent: toolResults,
     messageRole: 'user', // API role is 'user' for tool_result
     createdBy,

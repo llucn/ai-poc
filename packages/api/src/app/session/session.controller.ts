@@ -8,9 +8,10 @@ import {
   ParseIntPipe,
   Post,
   Query,
+  Req,
   Res,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { SessionService } from './session.service';
 import type {
@@ -74,6 +75,7 @@ export class SessionController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CreateMessageDto,
     @CurrentUser() user: any,
+    @Req() req: Request,
     @Res() res: Response
   ) {
     // 5.1: Set SSE headers
@@ -81,9 +83,14 @@ export class SessionController {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
+    // Abort signal: fires when the client disconnects so the service can
+    // stop calling the LLM and exit the loop early.
+    const abort = new AbortController();
+    req.on('close', () => abort.abort());
+
     const userName = user?.userName || user?.username || '';
     const createdBy = userName || 'system';
-    await this.sessionService.createMessage(id, dto, userName, createdBy, res);
+    await this.sessionService.createMessage(id, dto, userName, createdBy, res, abort.signal);
   }
 
   @Post(':id/client-result')
@@ -91,6 +98,7 @@ export class SessionController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ClientResultDto,
     @CurrentUser() user: any,
+    @Req() req: Request,
     @Res() res: Response
   ) {
     // SSE: the resumed turn streams its continuation (thoughts, final answer,
@@ -99,6 +107,9 @@ export class SessionController {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
+    const abort = new AbortController();
+    req.on('close', () => abort.abort());
+
     const userName = user?.userName || user?.username || '';
     const createdBy = userName || 'system';
     await this.sessionService.resumeClientResult(
@@ -106,7 +117,8 @@ export class SessionController {
       dto,
       userName,
       createdBy,
-      res
+      res,
+      abort.signal
     );
   }
 }

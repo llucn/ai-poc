@@ -215,7 +215,8 @@ export class SessionService {
     dto: CreateMessageDto,
     userName: string,
     createdBy: string,
-    res: Response
+    res: Response,
+    signal?: AbortSignal
   ): Promise<void> {
     // Verify session belongs to user
     const session = await this.sessionRepository.findOne({
@@ -236,7 +237,7 @@ export class SessionService {
     }
 
     try {
-      await this.runLlmTurn(session, agent, dto.content, userName, createdBy, res);
+      await this.runLlmTurn(session, agent, dto.content, userName, createdBy, res, signal);
     } catch (err) {
       // SSE event: error — runLlmTurn handles its own errors internally and
       // pushes error events itself; this only catches unexpected throws.
@@ -267,7 +268,8 @@ export class SessionService {
     dto: ClientResultDto,
     userName: string,
     createdBy: string,
-    res: Response
+    res: Response,
+    signal?: AbortSignal
   ): Promise<void> {
     res.write(': connection established\n\n');
 
@@ -367,7 +369,8 @@ export class SessionService {
         agent,
         messages,
         createdBy,
-        res
+        res,
+        signal
       );
     } catch (err) {
       const errorMessage =
@@ -398,7 +401,8 @@ export class SessionService {
     content: string,
     userName: string,
     createdBy: string,
-    res: Response
+    res: Response,
+    signal?: AbortSignal
   ): Promise<void> {
     const sessionId = session.id;
     const now = new Date();
@@ -462,7 +466,7 @@ export class SessionService {
     // Run the (re-entrant) agent loop. It runs until final_answer/error, the
     // tool-call cap, or a Client Tool suspends it (returns early after pushing
     // a `client_call` event).
-    await this.runLoop(session, agent, messages, createdBy, res);
+    await this.runLoop(session, agent, messages, createdBy, res, signal);
   }
 
   /**
@@ -491,7 +495,8 @@ export class SessionService {
     agent: AgentEntity,
     messages: MessageParam[],
     createdBy: string,
-    res: Response
+    res: Response,
+    signal?: AbortSignal
   ): Promise<void> {
     const sessionId = session.id;
     const now = new Date();
@@ -505,6 +510,15 @@ export class SessionService {
     );
 
     while (true) {
+      // Abort early if the client has disconnected.
+      if (signal?.aborted) {
+        this.logger.warn(
+          `Client disconnected for session ${sessionId}; aborting loop`
+        );
+        await this.finalizeSession(session, createdBy);
+        return;
+      }
+
       // Keep-alive comment before each LLM call to prevent connection timeout.
       res.write(': processing\n\n');
 

@@ -43,13 +43,6 @@ export function NativeContentView({ blocks }: { blocks: Block[] }) {
   return (
     <div className="chat-native">
       {blocks.map((block, i) => {
-        if (block.type === 'text') {
-          return (
-            <pre key={i} className="chat-native-text">
-              {block.text ?? ''}
-            </pre>
-          );
-        }
         if (block.type === 'tool_use') {
           return (
             <div key={i} className="chat-native-block">

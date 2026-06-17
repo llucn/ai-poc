@@ -111,19 +111,7 @@ function MessageItem({
               style={{ background: 'transparent', padding: 0, fontSize: '13px' }}
             />
           </div>
-          {hasNative && (
-            <button
-              type="button"
-              className="chat-native-toggle"
-              aria-expanded={expanded}
-              aria-label={expanded ? 'Collapse details' : 'Expand details'}
-              onClick={() => setExpanded((v) => !v)}
-            >
-              <FontAwesomeIcon icon={expanded ? faChevronUp : faChevronDown} />
-            </button>
-          )}
         </div>
-        {hasNative && expanded && <NativeContentView blocks={blocks} />}
       </div>
     </div>
   );
@@ -258,6 +246,7 @@ export function ChatPage() {
           method: 'POST',
           headers,
           body,
+          openWhenHidden: true,
           onmessage(ev) {
             if (
               ev.event === 'thought_created' ||
@@ -265,9 +254,15 @@ export function ChatPage() {
             ) {
               try {
                 const msg: Message = JSON.parse(ev.data);
-                setMessages((prev) =>
-                  prev.filter((m) => m.id !== THINKING_ID).concat(msg)
-                );
+                setMessages((prev) => {
+                  const filtered = prev.filter((m) => m.id !== THINKING_ID).concat(msg);
+                  // Keep the spinner after intermediate thoughts; only remove
+                  // it when the final answer arrives.
+                  if (ev.event === 'thought_created') {
+                    return filtered.concat(thinkingMsg);
+                  }
+                  return filtered;
+                });
               } catch {
                 // ignore parse errors
               }

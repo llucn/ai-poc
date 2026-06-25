@@ -6,6 +6,7 @@
 // each tool file imports defineClientTool from the executor, so the executor
 // must be fully evaluated before any tool file runs.
 import './console-log-echo';
+import './map-mark';
 import './prompt-input';
 import './select-string-array';
 import './select-users';

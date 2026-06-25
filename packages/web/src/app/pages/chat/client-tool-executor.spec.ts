@@ -159,3 +159,26 @@ describe('select-string-array tool registration', () => {
     expect(schema.required).not.toContain('searchable');
   });
 });
+
+describe('map-mark tool registration', () => {
+  it('is registered as a client tool', () => {
+    expect(hasClientTool('map-mark')).toBe(true);
+  });
+
+  it('emits JSON schema with required markers param', () => {
+    const tools = getAllClientTools();
+    const tool = tools.find((t) => t.name === 'map-mark');
+    expect(tool).toBeDefined();
+    const schema = tool?.parametersSchema as {
+      type: string;
+      properties: Record<string, unknown>;
+      required?: string[];
+    };
+    expect(schema.type).toBe('object');
+    expect(schema.properties).toHaveProperty('markers');
+    expect(schema.required).toContain('markers');
+    // Optional params should NOT be in required
+    expect(schema.required).not.toContain('title');
+    expect(schema.required).not.toContain('zoom');
+  });
+});

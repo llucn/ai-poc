@@ -135,3 +135,27 @@ describe('executeClientTool', () => {
     expect(typeof result.timestamp).toBe('number');
   });
 });
+
+describe('select-string-array tool registration', () => {
+  it('is registered as a client tool', () => {
+    expect(hasClientTool('select-string-array')).toBe(true);
+  });
+
+  it('emits JSON schema with required options param', () => {
+    const tools = getAllClientTools();
+    const tool = tools.find((t) => t.name === 'select-string-array');
+    expect(tool).toBeDefined();
+    const schema = tool?.parametersSchema as {
+      type: string;
+      properties: Record<string, unknown>;
+      required?: string[];
+    };
+    expect(schema.type).toBe('object');
+    expect(schema.properties).toHaveProperty('options');
+    expect(schema.required).toContain('options');
+    // Optional params should NOT be in required
+    expect(schema.required).not.toContain('title');
+    expect(schema.required).not.toContain('multiple');
+    expect(schema.required).not.toContain('searchable');
+  });
+});

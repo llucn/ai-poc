@@ -1440,6 +1440,29 @@ textarea.ic-input {
   gap: 8px;
 }
 
+.ic-search-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ic-search-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.ic-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
 .chat-container {
   display: flex;
   flex-direction: column;

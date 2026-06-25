@@ -61,4 +61,40 @@ describe('tool-area-bridge', () => {
     clearToolArea();
     expect(getActiveRequest()).toBeNull();
   });
+
+  it('select-string-array is registered as a client tool', () => {
+    expect(hasClientTool('select-string-array')).toBe(true);
+  });
+
+  it('select-string-array resolves with selected options on OK', async () => {
+    const promise = renderInToolArea<{ cancelled: boolean; selected: string[] }>(
+      (resolve) => {
+        // Simulate user selecting options and clicking OK
+        resolve({ cancelled: false, selected: ['option-a', 'option-c'] });
+        return null;
+      }
+    );
+    const active = getActiveRequest();
+    active?.render(active.settle);
+
+    const result = await promise;
+    expect(result).toEqual({ cancelled: false, selected: ['option-a', 'option-c'] });
+    expect(getActiveRequest()).toBeNull();
+  });
+
+  it('select-string-array resolves with cancelled result on Cancel', async () => {
+    const promise = renderInToolArea<{ cancelled: boolean; selected: string[] }>(
+      (resolve) => {
+        // Simulate user clicking Cancel
+        resolve({ cancelled: true, selected: [] });
+        return null;
+      }
+    );
+    const active = getActiveRequest();
+    active?.render(active.settle);
+
+    const result = await promise;
+    expect(result).toEqual({ cancelled: true, selected: [] });
+    expect(getActiveRequest()).toBeNull();
+  });
 });

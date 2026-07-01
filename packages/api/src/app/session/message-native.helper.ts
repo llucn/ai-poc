@@ -37,7 +37,7 @@ export function reconstructNativeMessages(rows: MessageEntity[]): MessageParam[]
         role,
         content: row.nativeContent as ContentBlockParam[],
       });
-    } else if (row.isThought !== 1 && row.content) {
+    } else if (!row.isThought && row.content) {
       // Legacy regular message - fallback to text-only. Thought rows without
       // nativeContent are UI-only and must not enter the context.
       messages.push({
@@ -80,7 +80,7 @@ export function createUserMessage(
     sessionId,
     userName,
     messageType: 1,
-    isThought: 0,
+    isThought: false,
     content: textContent,
     nativeContent: [{ type: 'text', text: textContent }],
     messageRole: 'user',
@@ -100,7 +100,7 @@ export function createAssistantMessage(
     sessionId,
     userName: ASSISTANT_USER,
     messageType: 1,
-    isThought: 0,
+    isThought: false,
     content: textContent,
     nativeContent: [{ type: 'text', text: textContent }],
     messageRole: 'assistant',
@@ -126,7 +126,7 @@ export function createAssistantToolUseMessage(
     sessionId,
     userName: ASSISTANT_USER,
     messageType: 1,
-    isThought: 1, // Fold in UI (not a regular message bubble)
+    isThought: true, // Fold in UI (not a regular message bubble)
     content: displayText || 'Calling tools…',
     nativeContent: assistantContent,
     messageRole: 'assistant',
@@ -138,7 +138,7 @@ export function createAssistantToolUseMessage(
  * Create a MessageEntity for merged tool results (user role in API, but internal).
  * This merges ALL tool_result blocks of one assistant turn into one user message.
  *
- * Per D2: one merged tool_result per turn = one row (isThought=1 for UI fold,
+ * Per D2: one merged tool_result per turn = one row (isThought=true for UI fold,
  * nativeContent contains all tool_result blocks for LLM context).
  */
 export function createToolResultsMessage(
@@ -150,7 +150,7 @@ export function createToolResultsMessage(
     sessionId,
     userName: ASSISTANT_USER, // Internal message, not user-authored
     messageType: 1,
-    isThought: 1, // Fold in UI (not a regular message bubble)
+    isThought: true, // Fold in UI (not a regular message bubble)
     content: 'Tool Result', // Fixed label; details live in nativeContent
     nativeContent: toolResults,
     messageRole: 'user', // API role is 'user' for tool_result

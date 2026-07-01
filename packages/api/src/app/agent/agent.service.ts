@@ -129,19 +129,19 @@ export class AgentService {
       throw new ConflictException(`Agent with name '${dto.name}' already exists`);
     }
 
-    const makeDefault = dto.isDefault === 1;
+    const makeDefault = dto.isDefault === true;
 
     const saved = await this.dataSource.transaction(async (manager) => {
       // Only one default agent allowed: clear others first.
       if (makeDefault) {
-        await manager.update(AgentEntity, { isDefault: 1 }, { isDefault: 0 });
+        await manager.update(AgentEntity, { isDefault: true }, { isDefault: false });
       }
 
       const agent = manager.create(AgentEntity, {
         name: dto.name,
         description: dto.description ?? null,
         modelConfig: dto.modelConfig ?? null,
-        isDefault: makeDefault ? 1 : 0,
+        isDefault: makeDefault,
         systemPrompt: null,
         createdOn: new Date(),
         createdBy,
@@ -192,15 +192,15 @@ export class AgentService {
         : incoming;
     }
     if (dto.isDefault !== undefined) {
-      agent.isDefault = dto.isDefault === 1 ? 1 : 0;
+      agent.isDefault = dto.isDefault;
     }
     agent.updatedOn = new Date();
     agent.updatedBy = updatedBy;
 
     const saved = await this.dataSource.transaction(async (manager) => {
       // Only one default agent allowed: clear others before saving this one.
-      if (agent.isDefault === 1) {
-        await manager.update(AgentEntity, { isDefault: 1 }, { isDefault: 0 });
+      if (agent.isDefault) {
+        await manager.update(AgentEntity, { isDefault: true }, { isDefault: false });
       }
       return manager.save(AgentEntity, agent);
     });

@@ -31,17 +31,17 @@ export class MessageEntity {
 
   // 1 marks this message as an assistant "thought" rendered as a
   // collapsible note. 0 is a regular message.
-  @Column({ name: 'is_thought', type: 'int', default: 0 })
-  isThought!: number;
+  @Column({ name: 'is_thought', type: 'boolean', default: false })
+  isThought!: boolean;
 
   // Display text for the UI. Always present for backward compatibility.
   // For native messages, this is a rendered summary of native_content.
-  @Column({ type: 'longtext', nullable: true })
+  @Column({ type: 'text', nullable: true })
   content!: string | null;
 
   // Native Anthropic content blocks (text, tool_use, tool_result).
   // Stored as JSON array of ContentBlockParam. NULL for legacy messages.
-  @Column({ name: 'native_content', type: 'json', nullable: true })
+  @Column({ name: 'native_content', type: 'jsonb', nullable: true })
   nativeContent!: ContentBlockParam[] | null;
 
   // Message role for native conversation reconstruction.

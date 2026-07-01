@@ -13,7 +13,7 @@ export class SkillEntity {
   @Column({ type: 'text', nullable: true })
   description!: string | null;
 
-  @Column({ type: 'longtext', nullable: true })
+  @Column({ type: 'text', nullable: true })
   content!: string | null;
 
   @Column({ name: 'created_on', type: 'timestamp' })

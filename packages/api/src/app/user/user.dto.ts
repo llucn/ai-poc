@@ -4,7 +4,7 @@ export interface CreateUserDto {
   email: string;
   role?: string | null;
   skillMatrix?: string | null;
-  isAvailable?: number;
+  isAvailable?: boolean;
 }
 
 export interface UpdateUserDto {
@@ -13,7 +13,7 @@ export interface UpdateUserDto {
   email?: string;
   role?: string | null;
   skillMatrix?: string | null;
-  isAvailable?: number;
+  isAvailable?: boolean;
 }
 
 export interface DeleteUsersDto {

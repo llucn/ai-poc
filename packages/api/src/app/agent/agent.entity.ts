@@ -17,13 +17,13 @@ export class AgentEntity {
   @Column({ type: 'text', nullable: true })
   description!: string | null;
 
-  @Column({ name: 'model_config', type: 'json', nullable: true })
+  @Column({ name: 'model_config', type: 'jsonb', nullable: true })
   modelConfig!: AgentModelConfig | null;
 
-  @Column({ name: 'is_default', type: 'int', default: 0 })
-  isDefault!: number;
+  @Column({ name: 'is_default', type: 'boolean', default: false })
+  isDefault!: boolean;
 
-  @Column({ name: 'system_prompt', type: 'longtext', nullable: true })
+  @Column({ name: 'system_prompt', type: 'text', nullable: true })
   systemPrompt!: string | null;
 
   @Column({ name: 'created_on', type: 'timestamp' })

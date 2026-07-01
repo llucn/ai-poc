@@ -8,7 +8,7 @@ export interface CreateAgentDto {
   name: string;
   description?: string | null;
   modelConfig?: AgentModelConfig | null;
-  isDefault?: number;
+  isDefault?: boolean;
 }
 
 // Update only touches basic info. modelConfig.authToken is optional: when
@@ -17,7 +17,7 @@ export interface UpdateAgentDto {
   name?: string;
   description?: string | null;
   modelConfig?: AgentModelConfig | null;
-  isDefault?: number;
+  isDefault?: boolean;
 }
 
 export interface UpdateSystemPromptDto {

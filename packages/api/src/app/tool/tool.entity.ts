@@ -39,7 +39,7 @@ export class ToolEntity {
   source!: ToolSource;
 
   // Parsed MCP registration info: array of { name, description, parameters }.
-  @Column({ name: 'mcp_schema', type: 'json', nullable: true })
+  @Column({ name: 'mcp_schema', type: 'jsonb', nullable: true })
   mcpSchema!: McpToolSchema[] | null;
 
   @Column({ name: 'created_on', type: 'timestamp' })

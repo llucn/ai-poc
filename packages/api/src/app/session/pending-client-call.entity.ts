@@ -56,12 +56,12 @@ export class PendingClientCallEntity {
   @Column({ name: 'tool_use_id', type: 'varchar', length: 255 })
   toolUseId!: string;
 
-  @Column({ name: 'params', type: 'json', nullable: true })
+  @Column({ name: 'params', type: 'jsonb', nullable: true })
   params!: unknown | null;
 
   // Single tool result object: {type:'tool_result', tool_use_id, content} or {error}.
   // NULL while pending; written when the tool completes (MCP immediate, Client on resume).
-  @Column({ name: 'message_context', type: 'json', nullable: true })
+  @Column({ name: 'message_context', type: 'jsonb', nullable: true })
   messageContext!: PendingToolResult | null;
 
   @Column({ name: 'status', type: 'varchar', length: 16, default: 'pending' })

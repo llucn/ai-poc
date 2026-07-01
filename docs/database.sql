@@ -1,60 +1,66 @@
-CREATE DATABASE IF NOT EXISTS ai_poc
-  DEFAULT CHARACTER SET utf8mb4
-  DEFAULT COLLATE utf8mb4_unicode_ci;
+-- PostgreSQL 16 database schema for AI POC
+-- Converted from MySQL schema
 
-USE ai_poc;
+CREATE DATABASE ai_poc
+  ENCODING 'UTF8'
+  LC_COLLATE = 'en_US.UTF-8'
+  LC_CTYPE = 'en_US.UTF-8';
+
+\c ai_poc;
 
 -- Table: t_user
 -- Mock users for demo authentication system
 CREATE TABLE IF NOT EXISTS t_user (
-  id INT AUTO_INCREMENT PRIMARY KEY,
+  id SERIAL PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   display_name VARCHAR(255) NOT NULL,
   email VARCHAR(255) NOT NULL,
-  role VARCHAR(255) NULL COMMENT 'Values: SUPERVISOR, TECHNICIAN, SYSTEM_ADMIN, CUSTOMER',
+  role VARCHAR(255) NULL, -- Values: SUPERVISOR, TECHNICIAN, SYSTEM_ADMIN, CUSTOMER
   skill_matrix TEXT NULL,
-  is_available INT NOT NULL DEFAULT 1,
-  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  is_available BOOLEAN NOT NULL DEFAULT TRUE,
+  created_on TIMESTAMP NOT NULL DEFAULT NOW(),
   created_by VARCHAR(255) NOT NULL,
-  updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  updated_by VARCHAR(255) NULL,
-  UNIQUE INDEX idx_user_name (name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  updated_on TIMESTAMP NULL DEFAULT NULL,
+  updated_by VARCHAR(255) NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_name ON t_user (name);
 
 -- Seed initial demo users
 INSERT INTO t_user (name, display_name, email, role, skill_matrix, is_available, created_by) VALUES
-('admin', 'System Administrator', 'admin@example.com', 'SYSTEM_ADMIN', 'System administration, user management', 1, 'system'),
-('supervisor1', 'John Supervisor', 'john.supervisor@example.com', 'SUPERVISOR', 'Team management, quality control', 1, 'system'),
-('tech1', 'Alice Technician', 'alice.tech@example.com', 'TECHNICIAN', 'Equipment repair, maintenance', 1, 'system'),
-('customer1', 'Bob Customer', 'bob.customer@example.com', 'CUSTOMER', NULL, 1, 'system');
+('admin', 'System Administrator', 'admin@example.com', 'SYSTEM_ADMIN', 'System administration, user management', TRUE, 'system'),
+('supervisor1', 'John Supervisor', 'john.supervisor@example.com', 'SUPERVISOR', 'Team management, quality control', TRUE, 'system'),
+('tech1', 'Alice Technician', 'alice.tech@example.com', 'TECHNICIAN', 'Equipment repair, maintenance', TRUE, 'system'),
+('customer1', 'Bob Customer', 'bob.customer@example.com', 'CUSTOMER', NULL, TRUE, 'system');
 
 -- Table: t_agent
 -- AI Agent basic information, model config and system prompt.
 -- is_default marks the single default agent (at most one row has
--- is_default = 1, enforced in the app layer).
--- model_config JSON shape: { baseUrl, authToken, modelName }, where
+-- is_default = TRUE, enforced in the app layer).
+-- model_config JSONB shape: { baseUrl, authToken, modelName }, where
 -- authToken is the Anthropic API key, modelName is a Claude model id
 -- (e.g. 'claude-opus-4-8'), and baseUrl is the Anthropic Messages API
 -- base URL (omit / leave null to use the SDK default).
 -- Per-call max_tokens is set in the API layer (global default constant).
 CREATE TABLE IF NOT EXISTS t_agent (
-  id INT AUTO_INCREMENT PRIMARY KEY,
+  id SERIAL PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   description TEXT NULL,
-  model_config JSON NULL,
-  is_default INT NOT NULL DEFAULT 0,
-  system_prompt LONGTEXT NULL,
-  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  model_config JSONB NULL,
+  is_default BOOLEAN NOT NULL DEFAULT FALSE,
+  system_prompt TEXT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT NOW(),
   created_by VARCHAR(255) NOT NULL,
-  updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  updated_by VARCHAR(255) NULL,
-  UNIQUE INDEX idx_agent_name (name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  updated_on TIMESTAMP NULL DEFAULT NULL,
+  updated_by VARCHAR(255) NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_name ON t_agent (name);
 
 -- Table: t_tool
 -- Top-level tool resource. Tools are shared across agents through the
 -- t_agent_tool association table. server_name is kebab-case and globally
--- unique. mcp_schema stores the tool definitions as a JSON array of
+-- unique. mcp_schema stores the tool definitions as a JSONB array of
 -- { name, description, parameters } objects.
 --
 -- kind distinguishes execution location:
@@ -66,20 +72,21 @@ CREATE TABLE IF NOT EXISTS t_agent (
 --   'registry' — auto-synced from a frontend defineClientTool declaration
 --                (truth lives in browser code; reconciled on POST /client-tools/sync)
 CREATE TABLE IF NOT EXISTS t_tool (
-  id INT AUTO_INCREMENT PRIMARY KEY,
+  id SERIAL PRIMARY KEY,
   server_name VARCHAR(255) NOT NULL,
   server_url VARCHAR(2048) NOT NULL,
   kind VARCHAR(16) NOT NULL,
   source VARCHAR(16) NOT NULL,
-  mcp_schema JSON NULL,
-  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  mcp_schema JSONB NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT NOW(),
   created_by VARCHAR(255) NOT NULL,
-  updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  updated_by VARCHAR(255) NULL,
-  UNIQUE INDEX idx_tool_server_name (server_name),
-  INDEX idx_tool_kind (kind),
-  INDEX idx_tool_source (source)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  updated_on TIMESTAMP NULL DEFAULT NULL,
+  updated_by VARCHAR(255) NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_server_name ON t_tool (server_name);
+CREATE INDEX IF NOT EXISTS idx_tool_kind ON t_tool (kind);
+CREATE INDEX IF NOT EXISTS idx_tool_source ON t_tool (source);
 
 -- The demo Client Tool `console-log-echo` is no longer seeded here. It is now
 -- declared in frontend code via defineClientTool and reconciled into t_tool
@@ -90,75 +97,79 @@ CREATE TABLE IF NOT EXISTS t_tool (
 -- t_agent_skill association table. name is kebab-case and globally unique.
 -- content holds Markdown text.
 CREATE TABLE IF NOT EXISTS t_skill (
-  id INT AUTO_INCREMENT PRIMARY KEY,
+  id SERIAL PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   description TEXT NULL,
-  content LONGTEXT NULL,
-  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  content TEXT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT NOW(),
   created_by VARCHAR(255) NOT NULL,
-  updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  updated_by VARCHAR(255) NULL,
-  UNIQUE INDEX idx_skill_name (name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  updated_on TIMESTAMP NULL DEFAULT NULL,
+  updated_by VARCHAR(255) NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_name ON t_skill (name);
 
 -- Table: t_agent_tool
 -- Association table linking an agent to a tool (many-to-many). Linked to
 -- t_agent via agent_id and t_tool via tool_id (plain columns, no DB foreign
 -- keys — referential integrity is enforced in the application layer).
 CREATE TABLE IF NOT EXISTS t_agent_tool (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  agent_id INT NOT NULL,
-  tool_id INT NOT NULL,
-  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  id SERIAL PRIMARY KEY,
+  agent_id INTEGER NOT NULL,
+  tool_id INTEGER NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT NOW(),
   created_by VARCHAR(255) NOT NULL,
-  updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  updated_by VARCHAR(255) NULL,
-  INDEX idx_agent_tool_agent_id (agent_id),
-  INDEX idx_agent_tool_tool_id (tool_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  updated_on TIMESTAMP NULL DEFAULT NULL,
+  updated_by VARCHAR(255) NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_tool_agent_id ON t_agent_tool (agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_tool_tool_id ON t_agent_tool (tool_id);
 
 -- Table: t_agent_skill
 -- Association table linking an agent to a skill (many-to-many). Linked to
 -- t_agent via agent_id and t_skill via skill_id (plain columns, no DB foreign
 -- keys — referential integrity is enforced in the application layer).
 CREATE TABLE IF NOT EXISTS t_agent_skill (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  agent_id INT NOT NULL,
-  skill_id INT NOT NULL,
-  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  id SERIAL PRIMARY KEY,
+  agent_id INTEGER NOT NULL,
+  skill_id INTEGER NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT NOW(),
   created_by VARCHAR(255) NOT NULL,
-  updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  updated_by VARCHAR(255) NULL,
-  INDEX idx_agent_skill_agent_id (agent_id),
-  INDEX idx_agent_skill_skill_id (skill_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  updated_on TIMESTAMP NULL DEFAULT NULL,
+  updated_by VARCHAR(255) NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_skill_agent_id ON t_agent_skill (agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_skill_skill_id ON t_agent_skill (skill_id);
 
 -- Table: t_session
 -- Chat sessions. Each session belongs to a single user (user_name).
 -- last_activity_time is denormalized for efficient list sorting.
 -- agent_id associates the session with an Agent for LLM context.
 CREATE TABLE IF NOT EXISTS t_session (
-  id INT AUTO_INCREMENT PRIMARY KEY,
+  id SERIAL PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   user_name VARCHAR(255) NOT NULL,
-  last_activity_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  agent_id INT NOT NULL,
-  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_activity_time TIMESTAMP NOT NULL DEFAULT NOW(),
+  agent_id INTEGER NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT NOW(),
   created_by VARCHAR(255) NOT NULL,
-  updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  updated_by VARCHAR(255) NULL,
-  INDEX idx_session_user_name (user_name),
-  INDEX idx_session_last_activity (last_activity_time)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  updated_on TIMESTAMP NULL DEFAULT NULL,
+  updated_by VARCHAR(255) NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_user_name ON t_session (user_name);
+CREATE INDEX IF NOT EXISTS idx_session_last_activity ON t_session (last_activity_time);
 
 -- Table: t_message
 -- Messages within a chat session. user_name is the sender; "ASSISTANT"
 -- for bot replies. message_type: 1=Text, 2=Image (only Text supported now).
--- is_thought: 1 marks an assistant "thought" entry rendered as a
--- collapsible note in the chat timeline; 0 is a regular message.
+-- is_thought: TRUE marks an assistant "thought" entry rendered as a
+-- collapsible note in the chat timeline; FALSE is a regular message.
 --
 -- Native content fields (for Anthropic Messages API reconstruction):
--- - native_content: JSON array of ContentBlockParam (text/tool_use/tool_result)
+-- - native_content: JSONB array of ContentBlockParam (text/tool_use/tool_result)
 -- - message_role: 'user' | 'assistant' (for API reconstruction)
 -- - turn_id: groups messages in the same turn for timeline rendering
 --
@@ -166,22 +177,23 @@ CREATE TABLE IF NOT EXISTS t_session (
 -- content (text-only). New messages store both content (display) and
 -- native_content (API reconstruction).
 CREATE TABLE IF NOT EXISTS t_message (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  session_id INT NOT NULL,
+  id SERIAL PRIMARY KEY,
+  session_id INTEGER NOT NULL,
   user_name VARCHAR(255) NOT NULL,
-  message_type INT NOT NULL DEFAULT 1,
-  is_thought INT NOT NULL DEFAULT 0,
-  content LONGTEXT NULL,
-  native_content JSON NULL COMMENT 'Anthropic MessageParam content blocks',
-  message_role VARCHAR(16) NULL COMMENT 'user | assistant',
-  turn_id INT NULL COMMENT 'Groups messages in the same turn',
-  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  message_type INTEGER NOT NULL DEFAULT 1,
+  is_thought BOOLEAN NOT NULL DEFAULT FALSE,
+  content TEXT NULL,
+  native_content JSONB NULL, -- Anthropic MessageParam content blocks
+  message_role VARCHAR(16) NULL, -- user | assistant
+  turn_id INTEGER NULL, -- Groups messages in the same turn
+  created_on TIMESTAMP NOT NULL DEFAULT NOW(),
   created_by VARCHAR(255) NOT NULL,
-  updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  updated_by VARCHAR(255) NULL,
-  INDEX idx_message_session_id (session_id),
-  INDEX idx_message_session_turn (session_id, turn_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  updated_on TIMESTAMP NULL DEFAULT NULL,
+  updated_by VARCHAR(255) NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_session_id ON t_message (session_id);
+CREATE INDEX IF NOT EXISTS idx_message_session_turn ON t_message (session_id, turn_id);
 
 -- Table: t_pending_client_call
 -- A suspended Client Tool call awaiting browser execution. When the LLM loop
@@ -202,22 +214,24 @@ CREATE TABLE IF NOT EXISTS t_message (
 --   while pending.
 -- status: 'pending' | 'completed' | 'failed' | 'timeout'.
 CREATE TABLE IF NOT EXISTS t_pending_client_call (
-  id INT AUTO_INCREMENT PRIMARY KEY,
+  id SERIAL PRIMARY KEY,
   call_id VARCHAR(255) NOT NULL,
-  session_id INT NOT NULL,
-  agent_id INT NOT NULL,
-  tool_id INT NOT NULL,
+  session_id INTEGER NOT NULL,
+  agent_id INTEGER NOT NULL,
+  tool_id INTEGER NOT NULL,
   tool_name VARCHAR(255) NOT NULL,
   tool_use_id VARCHAR(255) NOT NULL,
-  params JSON NULL,
-  message_context JSON NULL,
+  params JSONB NULL,
+  message_context JSONB NULL,
   status VARCHAR(16) NOT NULL DEFAULT 'pending',
-  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_on TIMESTAMP NOT NULL DEFAULT NOW(),
   created_by VARCHAR(255) NOT NULL,
-  updated_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-  updated_by VARCHAR(255) NULL,
-  UNIQUE INDEX idx_pending_call_tooluse (call_id, tool_use_id),
-  INDEX idx_pending_call_id (call_id),
-  INDEX idx_pending_session_id (session_id),
-  INDEX idx_pending_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  updated_on TIMESTAMP NULL DEFAULT NULL,
+  updated_by VARCHAR(255) NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_call_tooluse ON t_pending_client_call (call_id, tool_use_id);
+CREATE INDEX IF NOT EXISTS idx_pending_call_id ON t_pending_client_call (call_id);
+CREATE INDEX IF NOT EXISTS idx_pending_session_id ON t_pending_client_call (session_id);
+CREATE INDEX IF NOT EXISTS idx_pending_status ON t_pending_client_call (status);
+

@@ -76,7 +76,7 @@ export class UserService {
 
     const user = this.userRepository.create({
       ...dto,
-      isAvailable: dto.isAvailable ?? 1,
+      isAvailable: dto.isAvailable ?? true,
       createdOn: new Date(),
       createdBy,
     });

@@ -17,7 +17,7 @@ import { PendingClientCallEntity } from '../session/pending-client-call.entity';
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (cfg: ConfigService<AppConfig>) => ({
-        type: 'mysql',
+        type: 'postgres',
         host: cfg.get('db.host', { infer: true }) as string,
         port: cfg.get('db.port', { infer: true }) as number,
         username: cfg.get('db.user', { infer: true }) as string,

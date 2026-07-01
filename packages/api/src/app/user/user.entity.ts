@@ -20,8 +20,8 @@ export class UserEntity {
   @Column({ name: 'skill_matrix', type: 'text', nullable: true })
   skillMatrix!: string | null;
 
-  @Column({ name: 'is_available', type: 'int', default: 1 })
-  isAvailable!: number;
+  @Column({ name: 'is_available', type: 'boolean', default: true })
+  isAvailable!: boolean;
 
   @Column({ name: 'created_on', type: 'timestamp' })
   createdOn!: Date;

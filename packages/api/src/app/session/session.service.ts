@@ -183,7 +183,7 @@ export class SessionService {
 
     // Query default Agent
     const defaultAgent = await this.agentRepository.findOne({
-      where: { isDefault: 1 },
+      where: { isDefault: true },
     });
     if (!defaultAgent) {
       throw new NotFoundException(
@@ -420,7 +420,7 @@ export class SessionService {
         sessionId,
         userName,
         messageType: 1,
-        isThought: 0,
+        isThought: false,
         content,
       },
       order: { createdOn: 'DESC' },

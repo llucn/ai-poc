@@ -11,6 +11,8 @@ import { SkillEntity } from '../skill/skill.entity';
 import { SessionEntity } from '../session/session.entity';
 import { MessageEntity } from '../session/message.entity';
 import { PendingClientCallEntity } from '../session/pending-client-call.entity';
+import { DocumentEntity } from '../knowledge/document.entity';
+import { DocumentChunkEntity } from '../knowledge/document-chunk.entity';
 
 @Module({
   imports: [
@@ -33,6 +35,8 @@ import { PendingClientCallEntity } from '../session/pending-client-call.entity';
           SessionEntity,
           MessageEntity,
           PendingClientCallEntity,
+          DocumentEntity,
+          DocumentChunkEntity,
         ],
         synchronize: false,
         logging: ['error', 'warn'],

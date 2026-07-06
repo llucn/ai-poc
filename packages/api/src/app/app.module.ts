@@ -18,6 +18,7 @@ import { SkillModule } from './skill/skill.module';
 import { SessionModule } from './session/session.module';
 import { LlmModule } from './llm/llm.module';
 import { ClientToolsModule } from './client-tools/client-tools.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { ClientToolsModule } from './client-tools/client-tools.module';
     SessionModule,
     LlmModule,
     ClientToolsModule,
+    KnowledgeModule,
   ],
   controllers: [AppController],
   providers: [

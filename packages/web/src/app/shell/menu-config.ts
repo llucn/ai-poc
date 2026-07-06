@@ -28,6 +28,14 @@ export const DEMO_MENU: MenuItem[] = [
     ],
   },
   {
+    id: 'knowledge',
+    label: 'Knowledge',
+    children: [
+      { id: 'knowledge-search', label: 'Search', to: '/knowledge/search' },
+      { id: 'knowledge-documents', label: 'Documents', to: '/knowledge/documents' },
+    ],
+  },
+  {
     id: 'settings',
     label: 'Settings',
     children: [
@@ -35,7 +43,6 @@ export const DEMO_MENU: MenuItem[] = [
       { id: 'settings-agents', label: 'Agents', to: '/settings/agents', roles: ['SYSTEM_ADMIN'] },
       { id: 'settings-tools', label: 'Tools', to: '/settings/tools', roles: ['SYSTEM_ADMIN'] },
       { id: 'settings-skills', label: 'Skills', to: '/settings/skills', roles: ['SYSTEM_ADMIN'] },
-      { id: 'settings-knowledge', label: 'Knowledge', to: '/dashboard/overview', roles: ['SYSTEM_ADMIN'] },
       { id: 'settings-memory', label: 'Memory', to: '/dashboard/overview', roles: ['SYSTEM_ADMIN'] },
     ],
   },

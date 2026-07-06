@@ -58,15 +58,21 @@ export class ServerToolRegistryService {
    * Scan for tool definition files matching *.tool.ts pattern
    */
   private async scanToolFiles(): Promise<string[]> {
-    // Get absolute path to tools directory
-    const toolsDir = path.join(
-      process.cwd(),
-      'packages/api/src/app/tools',
-    );
-    const pattern = path.join(toolsDir, '*.tool.ts');
+    // Use __dirname to get the directory where this compiled file lives.
+    // In production, this will be dist/app/tool-registry.
+    // The tools directory is at ../tools relative to this file.
+    const toolsDir = path.join(__dirname, '..', 'tools');
 
-    // Use glob to find all tool files
-    const files = await glob(pattern.replace(/\\/g, '/'));
+    // Look for .js files (compiled output) or .ts files (development)
+    const jsPattern = path.join(toolsDir, '*.tool.js');
+    const tsPattern = path.join(toolsDir, '*.tool.ts');
+
+    // Try .js first (production), then .ts (development)
+    let files = await glob(jsPattern.replace(/\\/g, '/'));
+    if (files.length === 0) {
+      files = await glob(tsPattern.replace(/\\/g, '/'));
+    }
+
     return files;
   }
 

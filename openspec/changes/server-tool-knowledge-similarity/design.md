@@ -149,7 +149,7 @@ CREATE TABLE t_tool (
 **Server Tool Example Row:**
 ```json
 {
-  "name": "server__knowledge-similarity",
+  "name": "server__9__knowledge-similarity",
   "type": "SERVER",
   "description": "Search knowledge base using similarity matching",
   "input_schema": {
@@ -433,7 +433,7 @@ describe('Server Tool Execution', () => {
     const response = await request(app.getHttpServer())
       .post('/tools/execute')
       .send({
-        toolName: 'server__knowledge-similarity',
+        toolName: 'server__9__knowledge-similarity',
         params: { query: 'authentication', topN: 3 }
       });
 

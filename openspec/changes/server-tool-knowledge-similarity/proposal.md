@@ -21,8 +21,9 @@ There is a need for backend-defined tools that:
 ### 1. Server Tool Infrastructure
 
 **Tool Naming Convention:**
-- Prefix: `server__`
-- Example: `server__knowledge-similarity`
+- Prefix: `server__<id>__`
+- Example: `server__9__knowledge-similarity`
+- `<id>` is the tool's database ID from `t_tool` table
 
 **Definition Pattern:**
 ```typescript
@@ -57,7 +58,7 @@ export const knowledgeSimilarityTool = defineServerTool({
 
 ### 2. Knowledge Similarity Server Tool
 
-**Tool Name:** `server__knowledge-similarity`
+**Tool Name:** `server__<id>__knowledge-similarity` (where `<id>` is the tool's database ID)
 
 **Purpose:** Search knowledge base chunks using word_similarity (pg_trgm) and return multiple chunks per document.
 
@@ -103,7 +104,7 @@ export const knowledgeSimilarityTool = defineServerTool({
 ### Database Schema
 
 No changes needed to `t_tool` - existing schema supports this:
-- `name`: 'server__knowledge-similarity'
+- `name`: 'server__9__knowledge-similarity' (includes id)
 - `type`: 'SERVER'
 - `description`: Tool description
 - `input_schema`: JSON schema generated from Zod
@@ -145,7 +146,7 @@ packages/api/src/app/
 ## Risks & Mitigation
 
 **Risk:** Tool name conflicts with MCP/Client tools
-**Mitigation:** Enforce `server__` prefix validation
+**Mitigation:** Enforce `server__<id>__` prefix validation, where id is unique per tool
 
 **Risk:** Performance impact of loading all tool modules on startup
 **Mitigation:** Lazy-load tool executors, only register metadata on startup

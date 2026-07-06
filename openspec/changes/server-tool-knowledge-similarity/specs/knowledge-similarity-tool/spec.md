@@ -399,7 +399,7 @@ describe('knowledge-similarity tool (e2e)', () => {
     const result = await request(app.getHttpServer())
       .post('/tools/execute')
       .send({
-        toolName: 'server__knowledge-similarity',
+        toolName: 'server__9__knowledge-similarity', // includes tool ID
         params: {
           query: 'authentication',
           topN: 5,
@@ -452,7 +452,7 @@ LLM decides to use the tool:
 ```json
 {
   "tool_use": {
-    "name": "server__knowledge-similarity",
+    "name": "server__9__knowledge-similarity",
     "input": {
       "query": "deploy application production",
       "topN": 5

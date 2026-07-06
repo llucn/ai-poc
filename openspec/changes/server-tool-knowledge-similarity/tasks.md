@@ -107,7 +107,7 @@
 
 ### Manual Testing
 - [ ] Start API server and verify tools register on startup
-- [ ] Check database: verify `server__knowledge-similarity` exists in `t_tool`
+- [ ] Check database: verify `server__<id>__knowledge-similarity` exists in `t_tool` (with actual ID)
 - [ ] Execute tool via chat UI with test query
 - [ ] Verify response includes multiple chunks with scores
 - [ ] Test with tag filter
@@ -146,7 +146,7 @@
 ## Success Criteria
 
 - [x] Server tools auto-register on API startup
-- [x] `server__knowledge-similarity` tool executable from chat
+- [x] `server__<id>__knowledge-similarity` tool executable from chat (with actual ID)
 - [x] Tool returns multiple chunks per document
 - [x] Parameter validation works via Zod schema
 - [x] Tool execution time < 500ms for typical queries

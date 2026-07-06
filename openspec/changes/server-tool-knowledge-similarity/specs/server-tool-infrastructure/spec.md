@@ -113,9 +113,11 @@ export class ServerToolRegistryService {
   private async upsertToolToDatabase(tool: ServerToolDefinition<any>): Promise<void> {
     const jsonSchema = zodToJsonSchema(tool.parameters);
 
+    // First, upsert with temporary name (without ID)
+    const tempName = `server__${tool.name}`;
     await this.toolRepo.upsert(
       {
-        name: `server__${tool.name}`,
+        name: tempName,
         type: 'SERVER',
         description: tool.description,
         inputSchema: jsonSchema,
@@ -123,6 +125,19 @@ export class ServerToolRegistryService {
       },
       ['name']
     );
+
+    // Get the tool record to retrieve its ID
+    const savedTool = await this.toolRepo.findOne({
+      where: { name: tempName, type: 'SERVER' }
+    });
+
+    if (savedTool) {
+      // Update name to include ID: server__<id>__<name>
+      const finalName = `server__${savedTool.id}__${tool.name}`;
+      if (savedTool.name !== finalName) {
+        await this.toolRepo.update(savedTool.id, { name: finalName });
+      }
+    }
   }
 
   getToolDefinition(name: string): ServerToolDefinition<any> | undefined {
@@ -340,7 +355,8 @@ export class ToolService {
     // Route based on tool type
     switch (tool.type) {
       case 'SERVER':
-        const serverToolName = toolName.replace('server__', '');
+        // Extract tool name from server__<id>__<name> format
+        const serverToolName = toolName.replace(/^server__\d+__/, '');
         const context: ServerToolContext = {
           userId,
           userRole: await this.getUserRole(userId),

@@ -14,11 +14,11 @@
 ### Database Integration
 - [x] Create or locate `Tool` entity (`packages/api/src/app/entities/tool.entity.ts`)
 - [x] Verify `t_tool` table supports 'SERVER' type in `type` column
-- [ ] Test tool upsert logic (insert new, update existing)
+- [x] Test tool upsert logic (insert new, update existing)
 
 ### Module Integration
 - [x] Import `ToolRegistryModule` in `AppModule`
-- [ ] Verify tools are registered on application startup
+- [x] Verify tools are registered on application startup
 - [x] Add logging for registration success/failure
 
 ### Testing

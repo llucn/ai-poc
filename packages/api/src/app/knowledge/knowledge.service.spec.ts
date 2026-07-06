@@ -401,7 +401,7 @@ describe('KnowledgeService', () => {
       expect(result.total).toBe(1);
     });
 
-    it('searches with similarity type and uses trigram similarity', async () => {
+    it('searches with similarity type and uses word_similarity', async () => {
       const mockQb = {
         select: vi.fn().mockReturnThis(),
         addSelect: vi.fn().mockReturnThis(),
@@ -424,7 +424,7 @@ describe('KnowledgeService', () => {
 
       expect(result.data).toHaveLength(1);
       expect(result.data[0].rank).toBe(0.8);
-      expect(mockQb.addSelect).toHaveBeenCalledWith('similarity(c.chunk_content, :query)', 'rank');
+      expect(mockQb.addSelect).toHaveBeenCalledWith('word_similarity(:query, c.chunk_content)', 'rank');
     });
 
     it('adds tag filter when tags provided', async () => {

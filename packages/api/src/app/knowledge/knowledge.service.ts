@@ -395,8 +395,11 @@ export class KnowledgeService {
     page = 1,
     pageSize = 20,
   ) {
-    // Use trigram similarity search with pg_trgm extension
-    // similarity() returns a value between 0 and 1 (higher is better)
+    // Use word_similarity from pg_trgm extension
+    // word_similarity() checks if the query appears as a substring in the text,
+    // which works better for short queries against long content.
+    // The <% operator filters by pg_trgm.word_similarity_threshold (default 0.6).
+    // We lower it to 0.2 for better recall.
     const qb = this.chunkRepo.createQueryBuilder('c');
     qb.select([
       'c.id',
@@ -408,8 +411,8 @@ export class KnowledgeService {
       'c.chunkIndex',
       'c.chunkContent',
     ]);
-    qb.addSelect('similarity(c.chunk_content, :query)', 'rank');
-    qb.where('c.chunk_content % :query', { query }); // % operator uses trigram similarity
+    qb.addSelect('word_similarity(:query, c.chunk_content)', 'rank');
+    qb.where('word_similarity(:query, c.chunk_content) > 0.2', { query });
 
     if (tags && tags.length > 0) {
       qb.andWhere("c.document_tags->'tags' ?| :tags", { tags });

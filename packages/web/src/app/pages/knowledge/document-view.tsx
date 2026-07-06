@@ -14,7 +14,9 @@ import { DOC_TYPE_FILE, DOC_TYPE_ATTACHMENT } from './types';
 type DialogState =
   | { kind: 'none' }
   | { kind: 'delete' }
-  | { kind: 'rename' };
+  | { kind: 'rename' }
+  | { kind: 'edit-tags' }
+  | { kind: 'edit-content' };
 
 export function DocumentViewPage() {
   const { id } = useParams<{ id: string }>();
@@ -26,9 +28,7 @@ export function DocumentViewPage() {
   const [doc, setDoc] = useState<Document | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
-  const [editingTags, setEditingTags] = useState(false);
   const [tagsInput, setTagsInput] = useState('');
   const [dialog, setDialog] = useState<DialogState>({ kind: 'none' });
   const [busy, setBusy] = useState(false);
@@ -83,7 +83,7 @@ export function DocumentViewPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: editContent }),
       });
-      setEditing(false);
+      setDialog({ kind: 'none' });
       await loadDoc();
     } finally {
       setBusy(false);
@@ -99,7 +99,7 @@ export function DocumentViewPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tags }),
       });
-      setEditingTags(false);
+      setDialog({ kind: 'none' });
       await loadDoc();
     } finally {
       setBusy(false);
@@ -218,25 +218,15 @@ export function DocumentViewPage() {
       <section className="ic-section">
         <div className="ic-section-header">
           <h2 className="ic-section-title">Tags</h2>
-          {isAdmin && !editingTags && (
-            <button type="button" className="ic-icon-btn" aria-label="Edit tags" title="Edit" onClick={() => setEditingTags(true)}>
+          {isAdmin && (
+            <button type="button" className="ic-icon-btn" aria-label="Edit tags" title="Edit" onClick={() => { setTagsInput(doc.tags?.tags?.join(', ') || ''); setDialog({ kind: 'edit-tags' }); }}>
               <FontAwesomeIcon icon={faPen} />
             </button>
           )}
         </div>
-        {editingTags ? (
-          <div>
-            <input type="text" value={tagsInput} onChange={e => setTagsInput(e.target.value)} className="ic-input" placeholder="tag1, tag2, tag3" />
-            <div style={{ marginTop: '0.5rem' }}>
-              <button type="button" className="ic-btn ic-btn-primary" onClick={handleSaveTags} disabled={busy}>Save</button>
-              <button type="button" className="ic-btn ic-btn-secondary" onClick={() => setEditingTags(false)} disabled={busy} style={{ marginLeft: '0.5rem' }}>Cancel</button>
-            </div>
-          </div>
-        ) : (
-          <div className="ic-tag-list">
-            {doc.tags?.tags?.length ? doc.tags.tags.map(t => <span key={t} className="ic-tag">{t}</span>) : <span className="ic-field-hint">No tags</span>}
-          </div>
-        )}
+        <div className="ic-tag-list">
+          {doc.tags?.tags?.length ? doc.tags.tags.map(t => <span key={t} className="ic-tag">{t}</span>) : <span className="ic-field-hint">No tags</span>}
+        </div>
       </section>
 
       {/* Content - Markdown */}
@@ -244,25 +234,15 @@ export function DocumentViewPage() {
         <section className="ic-section">
           <div className="ic-section-header">
             <h2 className="ic-section-title">Content</h2>
-            {isAdmin && !editing && (
-              <button type="button" className="ic-icon-btn" aria-label="Edit content" title="Edit" onClick={() => setEditing(true)}>
+            {isAdmin && (
+              <button type="button" className="ic-icon-btn" aria-label="Edit content" title="Edit" onClick={() => { setEditContent(doc.content || ''); setDialog({ kind: 'edit-content' }); }}>
                 <FontAwesomeIcon icon={faPen} />
               </button>
             )}
           </div>
-          {editing ? (
-            <div>
-              <MDEditor value={editContent} onChange={(v) => setEditContent(v || '')} height={400} />
-              <div style={{ marginTop: '0.5rem' }}>
-                <button type="button" className="ic-btn ic-btn-primary" onClick={handleSaveContent} disabled={busy}>Save</button>
-                <button type="button" className="ic-btn ic-btn-secondary" onClick={() => { setEditing(false); setEditContent(doc.content || ''); }} disabled={busy} style={{ marginLeft: '0.5rem' }}>Cancel</button>
-              </div>
-            </div>
-          ) : (
-            <div className="ic-markdown-content">
-              <MarkdownPreview source={doc.content || ''} />
-            </div>
-          )}
+          <div className="ic-markdown-content">
+            <MarkdownPreview source={doc.content || ''} />
+          </div>
         </section>
       )}
 
@@ -300,6 +280,39 @@ export function DocumentViewPage() {
             <div className="ic-modal-actions">
               <button type="button" className="ic-btn ic-btn-secondary" onClick={closeDialog} disabled={busy}>Cancel</button>
               <button type="button" className="ic-btn ic-btn-primary" onClick={handleRename} disabled={!renameName.trim() || busy}>Rename</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {dialog.kind === 'edit-tags' && (
+        <div className="ic-modal-overlay" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) closeDialog(); }}>
+          <div className="ic-modal" role="dialog" aria-modal="true">
+            <h2 className="ic-modal-title">Edit Tags</h2>
+            <div className="ic-modal-body">
+              <div className="ic-field">
+                <label className="ic-field-label">Tags (comma-separated)</label>
+                <input type="text" value={tagsInput} onChange={e => setTagsInput(e.target.value)} className="ic-input" placeholder="tag1, tag2, tag3" autoFocus />
+              </div>
+            </div>
+            <div className="ic-modal-actions">
+              <button type="button" className="ic-btn ic-btn-secondary" onClick={closeDialog} disabled={busy}>Cancel</button>
+              <button type="button" className="ic-btn ic-btn-primary" onClick={handleSaveTags} disabled={busy}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {dialog.kind === 'edit-content' && (
+        <div className="ic-modal-overlay" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) closeDialog(); }}>
+          <div className="ic-modal ic-modal-lg" role="dialog" aria-modal="true">
+            <h2 className="ic-modal-title">Edit Content</h2>
+            <div className="ic-modal-body">
+              <MDEditor value={editContent} onChange={(v) => setEditContent(v || '')} height={400} />
+            </div>
+            <div className="ic-modal-actions">
+              <button type="button" className="ic-btn ic-btn-secondary" onClick={closeDialog} disabled={busy}>Cancel</button>
+              <button type="button" className="ic-btn ic-btn-primary" onClick={handleSaveContent} disabled={busy}>Save</button>
             </div>
           </div>
         </div>

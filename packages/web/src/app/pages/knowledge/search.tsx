@@ -108,7 +108,7 @@ export function SearchPage() {
             autoFocus
             style={{ flex: 1 }}
           />
-          <button type="submit" className="ic-btn ic-btn-secondary" disabled={loading || !query.trim()}>
+          <button type="submit" className="ic-btn ic-btn-primary" disabled={loading || !query.trim()}>
             <FontAwesomeIcon icon={faSearch} /> Keyword Search
           </button>
           <button type="button" className="ic-btn ic-btn-secondary" onClick={handleSimilaritySearch} disabled={loading || !query.trim()}>

@@ -1,15 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { z } from 'zod';
 import { ToolEntity } from '../tool/tool.entity';
 import { ServerToolDefinition } from './define-server-tool';
-import { glob } from 'glob';
-import { zodToJsonSchema } from 'zod-to-json-schema';
-import * as path from 'path';
+import { SERVER_TOOLS } from '../tools';
 
 /**
- * Service responsible for scanning, loading, and registering server tools
- * from the filesystem into the database at application startup.
+ * Service responsible for registering server tools from the SERVER_TOOLS
+ * registry into the database at application startup.
  */
 @Injectable()
 export class ServerToolRegistryService {
@@ -22,25 +21,25 @@ export class ServerToolRegistryService {
   ) {}
 
   /**
-   * Scan and register all server tools from packages/api/src/app/tools/*.tool.ts
+   * Register all server tools from the SERVER_TOOLS registry
    */
   async registerAllServerTools(): Promise<void> {
     this.logger.log('Starting server tool registration...');
 
     try {
-      const toolFiles = await this.scanToolFiles();
-      this.logger.log(`Found ${toolFiles.length} tool files`);
+      this.logger.log(`Found ${SERVER_TOOLS.length} tools to register`);
 
-      for (const filePath of toolFiles) {
+      for (const toolDef of SERVER_TOOLS) {
         try {
-          const toolDef = await this.loadToolModule(filePath);
           await this.upsertToolToDatabase(toolDef);
           this.toolCache.set(toolDef.name, toolDef);
           this.logger.log(`✓ Registered tool: ${toolDef.name}`);
         } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const stack = error instanceof Error ? error.stack : undefined;
           this.logger.error(
-            `Failed to register tool from ${filePath}: ${error.message}`,
-            error.stack,
+            `Failed to register tool ${toolDef.name}: ${message}`,
+            stack,
           );
         }
       }
@@ -55,74 +54,24 @@ export class ServerToolRegistryService {
   }
 
   /**
-   * Scan for tool definition files matching *.tool.ts pattern
-   */
-  private async scanToolFiles(): Promise<string[]> {
-    // Use __dirname to get the directory where this compiled file lives.
-    // In production, this will be dist/app/tool-registry.
-    // The tools directory is at ../tools relative to this file.
-    const toolsDir = path.join(__dirname, '..', 'tools');
-
-    // Look for .js files (compiled output) or .ts files (development)
-    const jsPattern = path.join(toolsDir, '*.tool.js');
-    const tsPattern = path.join(toolsDir, '*.tool.ts');
-
-    // Try .js first (production), then .ts (development)
-    let files = await glob(jsPattern.replace(/\\/g, '/'));
-    if (files.length === 0) {
-      files = await glob(tsPattern.replace(/\\/g, '/'));
-    }
-
-    return files;
-  }
-
-  /**
-   * Dynamically import a tool module and extract its tool definition
-   */
-  private async loadToolModule(
-    filePath: string,
-  ): Promise<ServerToolDefinition<any>> {
-    const module = await import(filePath);
-
-    // Find exported tool definition
-    for (const exportName of Object.keys(module)) {
-      const exported = module[exportName];
-      if (this.isServerToolDefinition(exported)) {
-        return exported;
-      }
-    }
-
-    throw new Error(`No server tool definition found in ${filePath}`);
-  }
-
-  /**
-   * Type guard to check if an object is a ServerToolDefinition
-   */
-  private isServerToolDefinition(obj: any): obj is ServerToolDefinition<any> {
-    return (
-      obj &&
-      typeof obj === 'object' &&
-      typeof obj.name === 'string' &&
-      typeof obj.description === 'string' &&
-      obj.parameters &&
-      typeof obj.execute === 'function'
-    );
-  }
-
-  /**
    * Insert or update a tool in the database with server__ prefix and ID
    */
   private async upsertToolToDatabase(
     tool: ServerToolDefinition<any>,
   ): Promise<void> {
-    const jsonSchema = zodToJsonSchema(tool.parameters);
+    // Convert Zod schema to JSON Schema using Zod's native method
+    // This matches how Client Tools serialize their schemas
+    const jsonSchema = tool.parameters.toJSONSchema();
 
-    // First, upsert with temporary name (without ID)
-    const tempName = `server__${tool.name}`;
+    this.logger.debug(
+      `Generated JSON Schema for ${tool.name}: ${JSON.stringify(jsonSchema)}`,
+    );
 
+    // Store the tool name without prefix (e.g., "knowledge-similarity")
+    // The prefix server__<id>__ is added when building the tool list for the LLM
     await this.toolRepo.upsert(
       {
-        serverName: tempName,
+        serverName: tool.name,
         serverUrl: '', // Not used for server tools
         kind: 'server',
         source: 'registry',
@@ -140,23 +89,6 @@ export class ServerToolRegistryService {
       },
       ['serverName'],
     );
-
-    // Get the tool record to retrieve its ID
-    const savedTool = await this.toolRepo.findOne({
-      where: { serverName: tempName, kind: 'server' },
-    });
-
-    if (savedTool) {
-      // Update name to include ID: server__<id>__<name>
-      const finalName = `server__${savedTool.id}__${tool.name}`;
-      if (savedTool.serverName !== finalName) {
-        await this.toolRepo.update(savedTool.id, {
-          serverName: finalName,
-          updatedOn: new Date(),
-        });
-        this.logger.log(`Updated tool name: ${tempName} → ${finalName}`);
-      }
-    }
   }
 
   /**

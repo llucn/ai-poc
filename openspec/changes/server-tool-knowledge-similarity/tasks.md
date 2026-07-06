@@ -3,23 +3,23 @@
 ## Phase 1: Server Tool Infrastructure
 
 ### Tool Registry Core
-- [ ] Create `packages/api/src/app/tool-registry/` directory
-- [ ] Implement `define-server-tool.ts` with `defineServerTool` function and type definitions
-- [ ] Implement `server-tool-registry.service.ts` with tool scanning and registration logic
-- [ ] Implement `server-tool-executor.service.ts` with parameter validation and execution
-- [ ] Create `tool-registry.module.ts` with `OnModuleInit` hook for auto-registration
-- [ ] Add `zod-to-json-schema` dependency to `package.json`
-- [ ] Add `glob` dependency to `package.json`
+- [x] Create `packages/api/src/app/tool-registry/` directory
+- [x] Implement `define-server-tool.ts` with `defineServerTool` function and type definitions
+- [x] Implement `server-tool-registry.service.ts` with tool scanning and registration logic
+- [x] Implement `server-tool-executor.service.ts` with parameter validation and execution
+- [x] Create `tool-registry.module.ts` with `OnModuleInit` hook for auto-registration
+- [x] Add `zod-to-json-schema` dependency to `package.json`
+- [x] Add `glob` dependency to `package.json`
 
 ### Database Integration
-- [ ] Create or locate `Tool` entity (`packages/api/src/app/entities/tool.entity.ts`)
-- [ ] Verify `t_tool` table supports 'SERVER' type in `type` column
+- [x] Create or locate `Tool` entity (`packages/api/src/app/entities/tool.entity.ts`)
+- [x] Verify `t_tool` table supports 'SERVER' type in `type` column
 - [ ] Test tool upsert logic (insert new, update existing)
 
 ### Module Integration
-- [ ] Import `ToolRegistryModule` in `AppModule`
+- [x] Import `ToolRegistryModule` in `AppModule`
 - [ ] Verify tools are registered on application startup
-- [ ] Add logging for registration success/failure
+- [x] Add logging for registration success/failure
 
 ### Testing
 - [ ] Write unit tests for `defineServerTool` validation
@@ -31,16 +31,16 @@
 ## Phase 2: Tool Execution Integration
 
 ### Tool Service Update
-- [ ] Locate existing tool execution service (e.g., `ToolService`)
-- [ ] Add `ServerToolExecutorService` as dependency
-- [ ] Update tool execution router to handle 'SERVER' type
-- [ ] Implement `ServerToolContext` construction (userId, userRole, sessionId, requestId)
-- [ ] Add error handling for server tool execution failures
+- [x] Locate existing tool execution service (e.g., `ToolService`)
+- [x] Add `ServerToolExecutorService` as dependency
+- [x] Update tool execution router to handle 'SERVER' type
+- [x] Implement `ServerToolContext` construction (userId, userRole, sessionId, requestId)
+- [x] Add error handling for server tool execution failures
 
 ### Service Injection
-- [ ] Design pattern for injecting services into tool execution context
-- [ ] Implement service provider mechanism for tools to access repositories/services
-- [ ] Update `ServerToolContext` interface to include service accessor
+- [x] Design pattern for injecting services into tool execution context
+- [x] Implement service provider mechanism for tools to access repositories/services
+- [x] Update `ServerToolContext` interface to include service accessor
 
 ### Testing
 - [ ] Write integration test for SERVER tool execution via API
@@ -51,23 +51,23 @@
 ## Phase 3: Knowledge Similarity Tool
 
 ### Service Implementation
-- [ ] Create `packages/api/src/app/tools/` directory
-- [ ] Implement `knowledge-similarity-tool.service.ts` with similarity search query
-- [ ] Use `word_similarity()` function with threshold 0.2
-- [ ] Implement tag filtering with JSONB `?|` operator
-- [ ] Implement topN limit and score ordering
-- [ ] Format response with document metadata and scores
+- [x] Create `packages/api/src/app/tools/` directory
+- [x] Implement `knowledge-similarity-tool.service.ts` with similarity search query
+- [x] Use `word_similarity()` function with threshold 0.2
+- [x] Implement tag filtering with JSONB `?|` operator
+- [x] Implement topN limit and score ordering
+- [x] Format response with document metadata and scores
 
 ### Tool Definition
-- [ ] Create `knowledge-similarity.tool.ts` with `defineServerTool`
-- [ ] Define Zod schema for parameters (query, tags, topN)
-- [ ] Implement execute function calling the service
-- [ ] Add comprehensive tool description for LLM
+- [x] Create `knowledge-similarity.tool.ts` with `defineServerTool`
+- [x] Define Zod schema for parameters (query, tags, topN)
+- [x] Implement execute function calling the service
+- [x] Add comprehensive tool description for LLM
 
 ### Module Configuration
-- [ ] Create `tools.module.ts` importing DocumentChunk entity
-- [ ] Export `KnowledgeSimilarityToolService`
-- [ ] Import `ToolsModule` in `AppModule`
+- [x] Create `tools.module.ts` importing DocumentChunk entity
+- [x] Export `KnowledgeSimilarityToolService`
+- [x] Import `ToolsModule` in `AppModule`
 
 ### Testing
 - [ ] Write unit tests for `KnowledgeSimilarityToolService`

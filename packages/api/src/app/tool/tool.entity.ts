@@ -10,7 +10,8 @@ export interface McpToolSchema {
 // Tool execution location:
 //   'mcp'    — executed server-side via the MCP server at serverUrl
 //   'client' — executed in the browser; serverUrl is unused
-export type ToolKind = 'mcp' | 'client';
+//   'server' — executed server-side via backend tool registry; serverUrl is unused
+export type ToolKind = 'mcp' | 'client' | 'server';
 
 // How a tool row is managed:
 //   'database' — created/edited by an admin in the Tools UI (persisted truth)

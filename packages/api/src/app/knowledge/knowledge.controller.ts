@@ -55,15 +55,17 @@ export class KnowledgeController {
   @Roles()
   async search(
     @Query('q') query: string,
+    @Query('type') type?: string,
     @Query('tags') tags?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
     if (!query) throw new BadRequestException('Query parameter "q" is required');
+    const searchType = type === 'similarity' ? 'similarity' : 'keyword';
     const tagList = tags ? tags.split(',').map((t) => t.trim()) : undefined;
     const pageNum = page ? parseInt(page, 10) : 1;
     const pageSizeNum = pageSize ? parseInt(pageSize, 10) : 20;
-    return this.knowledgeService.search(query, tagList, pageNum, pageSizeNum);
+    return this.knowledgeService.search(query, searchType, tagList, pageNum, pageSizeNum);
   }
 
   // --- Write operations: SYSTEM_ADMIN only ---

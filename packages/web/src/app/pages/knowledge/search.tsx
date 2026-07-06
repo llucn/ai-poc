@@ -27,13 +27,14 @@ interface SearchResponse {
 export function SearchPage() {
   const apiFetch = useApiFetch();
   const [query, setQuery] = useState('');
+  const [searchType, setSearchType] = useState<'keyword' | 'similarity'>('keyword');
   const [results, setResults] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
-  const handleSearch = useCallback(async (searchQuery: string, pageNum: number) => {
+  const handleSearch = useCallback(async (searchQuery: string, type: 'keyword' | 'similarity', pageNum: number) => {
     if (!searchQuery.trim()) {
       setResults(null);
       return;
@@ -43,7 +44,7 @@ export function SearchPage() {
       setLoading(true);
       setError(null);
       const res = await apiFetch(
-        `/knowledge/search?q=${encodeURIComponent(searchQuery)}&page=${pageNum}&pageSize=${pageSize}`
+        `/knowledge/search?q=${encodeURIComponent(searchQuery)}&type=${type}&page=${pageNum}&pageSize=${pageSize}`
       );
       const data = await res.json();
       setResults(data);
@@ -55,15 +56,23 @@ export function SearchPage() {
     }
   }, [apiFetch]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleKeywordSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    setSearchType('keyword');
     setPage(1);
-    handleSearch(query, 1);
+    handleSearch(query, 'keyword', 1);
+  };
+
+  const handleSimilaritySearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSearchType('similarity');
+    setPage(1);
+    handleSearch(query, 'similarity', 1);
   };
 
   const handlePageChange = (newPage: number) => {
     setPage(newPage);
-    handleSearch(query, newPage);
+    handleSearch(query, searchType, newPage);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -88,8 +97,8 @@ export function SearchPage() {
         <h1 className="ic-page-title">Knowledge Search</h1>
       </header>
 
-      <form onSubmit={handleSubmit} style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', gap: '0.5rem', maxWidth: '600px' }}>
+      <form onSubmit={handleKeywordSearch} style={{ marginBottom: '1.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', maxWidth: '800px' }}>
           <input
             type="text"
             value={query}
@@ -99,8 +108,11 @@ export function SearchPage() {
             autoFocus
             style={{ flex: 1 }}
           />
-          <button type="submit" className="ic-btn ic-btn-primary" disabled={loading || !query.trim()}>
-            <FontAwesomeIcon icon={faSearch} /> Search
+          <button type="submit" className="ic-btn ic-btn-secondary" disabled={loading || !query.trim()}>
+            <FontAwesomeIcon icon={faSearch} /> Keyword Search
+          </button>
+          <button type="button" className="ic-btn ic-btn-secondary" onClick={handleSimilaritySearch} disabled={loading || !query.trim()}>
+            <FontAwesomeIcon icon={faSearch} /> Similarity Search
           </button>
         </div>
       </form>
@@ -113,6 +125,9 @@ export function SearchPage() {
         <div>
           <p style={{ marginBottom: '1rem', color: '#666' }}>
             Found {results.total} {results.total === 1 ? 'document' : 'documents'} matching "{query}"
+            <span style={{ marginLeft: '0.5rem', fontStyle: 'italic' }}>
+              ({searchType === 'keyword' ? 'Keyword Search' : 'Similarity Search'})
+            </span>
           </p>
 
           {results.data.length === 0 ? (

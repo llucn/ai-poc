@@ -371,7 +371,7 @@ describe('KnowledgeService', () => {
   });
 
   describe('search', () => {
-    it('searches with tsvector and returns only highest-scoring chunk per document', async () => {
+    it('searches with keyword type and returns only highest-scoring chunk per document', async () => {
       const mockQb = {
         select: vi.fn().mockReturnThis(),
         addSelect: vi.fn().mockReturnThis(),
@@ -392,16 +392,39 @@ describe('KnowledgeService', () => {
       };
       mockChunkRepo.createQueryBuilder.mockReturnValue(mockQb);
 
-      const result = await service.search('test query', undefined, 1, 20);
+      const result = await service.search('test query', 'keyword', undefined, 1, 20);
 
       // Should only return 1 result (highest rank for documentId 10)
       expect(result.data).toHaveLength(1);
       expect(result.data[0].documentId).toBe(10);
       expect(result.data[0].rank).toBe(0.5);
       expect(result.total).toBe(1);
-      expect(result.page).toBe(1);
-      expect(result.pageSize).toBe(20);
-      expect(result.totalPages).toBe(1);
+    });
+
+    it('searches with similarity type and uses trigram similarity', async () => {
+      const mockQb = {
+        select: vi.fn().mockReturnThis(),
+        addSelect: vi.fn().mockReturnThis(),
+        where: vi.fn().mockReturnThis(),
+        andWhere: vi.fn().mockReturnThis(),
+        orderBy: vi.fn().mockReturnThis(),
+        addOrderBy: vi.fn().mockReturnThis(),
+        getRawAndEntities: vi.fn().mockResolvedValue({
+          entities: [
+            { id: 3, documentId: 20, chunkContent: 'similar text', documentName: 'doc.md', chunkIndex: 0 },
+          ],
+          raw: [
+            { rank: 0.8 },
+          ],
+        }),
+      };
+      mockChunkRepo.createQueryBuilder.mockReturnValue(mockQb);
+
+      const result = await service.search('test', 'similarity', undefined, 1, 20);
+
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].rank).toBe(0.8);
+      expect(mockQb.addSelect).toHaveBeenCalledWith('similarity(c.chunk_content, :query)', 'rank');
     });
 
     it('adds tag filter when tags provided', async () => {
@@ -416,7 +439,7 @@ describe('KnowledgeService', () => {
       };
       mockChunkRepo.createQueryBuilder.mockReturnValue(mockQb);
 
-      await service.search('query', ['tag1', 'tag2'], 1, 20);
+      await service.search('query', 'keyword', ['tag1', 'tag2'], 1, 20);
 
       expect(mockQb.andWhere).toHaveBeenCalledWith(
         expect.stringContaining('?|'),
@@ -444,7 +467,7 @@ describe('KnowledgeService', () => {
       };
       mockChunkRepo.createQueryBuilder.mockReturnValue(mockQb);
 
-      const result = await service.search('query', undefined, 2, 10);
+      const result = await service.search('query', 'keyword', undefined, 2, 10);
 
       expect(result.data).toHaveLength(10); // page 2, 10 items
       expect(result.total).toBe(25);

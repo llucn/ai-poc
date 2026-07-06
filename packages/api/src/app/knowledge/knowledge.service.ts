@@ -317,11 +317,24 @@ export class KnowledgeService {
 
   async search(
     query: string,
+    type: 'keyword' | 'similarity' = 'keyword',
     tags?: string[],
     page = 1,
     pageSize = 20,
   ) {
-    // Use DISTINCT ON to get only the highest-scoring chunk per document
+    if (type === 'similarity') {
+      return this.searchBySimilarity(query, tags, page, pageSize);
+    }
+    return this.searchByKeyword(query, tags, page, pageSize);
+  }
+
+  private async searchByKeyword(
+    query: string,
+    tags?: string[],
+    page = 1,
+    pageSize = 20,
+  ) {
+    // Use full-text search with ts_rank
     const qb = this.chunkRepo.createQueryBuilder('c');
     qb.select([
       'c.id',
@@ -335,6 +348,68 @@ export class KnowledgeService {
     ]);
     qb.addSelect("ts_rank(c.search_vector, plainto_tsquery('english', :query))", 'rank');
     qb.where("c.search_vector @@ plainto_tsquery('english', :query)", { query });
+
+    if (tags && tags.length > 0) {
+      qb.andWhere("c.document_tags->'tags' ?| :tags", { tags });
+    }
+
+    // Order by document_id first, then rank DESC to get highest rank per document
+    qb.orderBy('c.documentId', 'ASC');
+    qb.addOrderBy('rank', 'DESC');
+
+    // Execute query to get all matching chunks
+    const allChunks = await qb.getRawAndEntities();
+
+    // Group by documentId and keep only the highest-scoring chunk per document
+    const docMap = new Map();
+    for (let i = 0; i < allChunks.entities.length; i++) {
+      const chunk = allChunks.entities[i];
+      const rank = allChunks.raw[i].rank;
+      const docId = chunk.documentId;
+
+      if (!docMap.has(docId) || docMap.get(docId).rank < rank) {
+        docMap.set(docId, { ...chunk, rank });
+      }
+    }
+
+    // Convert to array and sort by rank descending
+    const uniqueChunks = Array.from(docMap.values()).sort((a, b) => b.rank - a.rank);
+
+    // Apply pagination
+    const total = uniqueChunks.length;
+    const startIdx = (page - 1) * pageSize;
+    const data = uniqueChunks.slice(startIdx, startIdx + pageSize);
+
+    return {
+      data,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
+  }
+
+  private async searchBySimilarity(
+    query: string,
+    tags?: string[],
+    page = 1,
+    pageSize = 20,
+  ) {
+    // Use trigram similarity search with pg_trgm extension
+    // similarity() returns a value between 0 and 1 (higher is better)
+    const qb = this.chunkRepo.createQueryBuilder('c');
+    qb.select([
+      'c.id',
+      'c.documentId',
+      'c.documentName',
+      'c.documentType',
+      'c.documentPath',
+      'c.documentTags',
+      'c.chunkIndex',
+      'c.chunkContent',
+    ]);
+    qb.addSelect('similarity(c.chunk_content, :query)', 'rank');
+    qb.where('c.chunk_content % :query', { query }); // % operator uses trigram similarity
 
     if (tags && tags.length > 0) {
       qb.andWhere("c.document_tags->'tags' ?| :tags", { tags });

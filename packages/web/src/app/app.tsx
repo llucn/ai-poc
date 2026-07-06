@@ -31,6 +31,7 @@ import { ChatPage } from './pages/chat/chat-page';
 import { AppShell } from './shell/app-shell';
 import { DocumentListPage } from './pages/knowledge/document-list';
 import { DocumentViewPage } from './pages/knowledge/document-view';
+import { SearchPage } from './pages/knowledge/search';
 
 export function App() {
   const apiFetch = useApiFetch();
@@ -80,6 +81,7 @@ export function App() {
                 <Route path="/chat" element={<SessionListPage />} />
                 <Route path="/knowledge/documents" element={<DocumentListPage />} />
                 <Route path="/knowledge/documents/:id" element={<DocumentViewPage />} />
+                <Route path="/knowledge/search" element={<SearchPage />} />
                 <Route
                   path="/settings/users"
                   element={

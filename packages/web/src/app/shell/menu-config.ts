@@ -31,6 +31,7 @@ export const DEMO_MENU: MenuItem[] = [
     id: 'knowledge',
     label: 'Knowledge',
     children: [
+      { id: 'knowledge-search', label: 'Search', to: '/knowledge/search' },
       { id: 'knowledge-documents', label: 'Documents', to: '/knowledge/documents' },
     ],
   },

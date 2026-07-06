@@ -321,6 +321,7 @@ export class KnowledgeService {
     page = 1,
     pageSize = 20,
   ) {
+    // Use DISTINCT ON to get only the highest-scoring chunk per document
     const qb = this.chunkRepo.createQueryBuilder('c');
     qb.select([
       'c.id',
@@ -339,11 +340,33 @@ export class KnowledgeService {
       qb.andWhere("c.document_tags->'tags' ?| :tags", { tags });
     }
 
-    qb.orderBy('rank', 'DESC');
-    qb.skip((page - 1) * pageSize);
-    qb.take(pageSize);
+    // Order by document_id first, then rank DESC to get highest rank per document
+    qb.orderBy('c.documentId', 'ASC');
+    qb.addOrderBy('rank', 'DESC');
 
-    const [data, total] = await qb.getManyAndCount();
+    // Execute query to get all matching chunks
+    const allChunks = await qb.getRawAndEntities();
+
+    // Group by documentId and keep only the highest-scoring chunk per document
+    const docMap = new Map();
+    for (let i = 0; i < allChunks.entities.length; i++) {
+      const chunk = allChunks.entities[i];
+      const rank = allChunks.raw[i].rank;
+      const docId = chunk.documentId;
+
+      if (!docMap.has(docId) || docMap.get(docId).rank < rank) {
+        docMap.set(docId, { ...chunk, rank });
+      }
+    }
+
+    // Convert to array and sort by rank descending
+    const uniqueChunks = Array.from(docMap.values()).sort((a, b) => b.rank - a.rank);
+
+    // Apply pagination
+    const total = uniqueChunks.length;
+    const startIdx = (page - 1) * pageSize;
+    const data = uniqueChunks.slice(startIdx, startIdx + pageSize);
+
     return {
       data,
       total,

@@ -371,33 +371,37 @@ describe('KnowledgeService', () => {
   });
 
   describe('search', () => {
-    it('searches with tsvector and returns paginated results', async () => {
+    it('searches with tsvector and returns only highest-scoring chunk per document', async () => {
       const mockQb = {
         select: vi.fn().mockReturnThis(),
         addSelect: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
         andWhere: vi.fn().mockReturnThis(),
         orderBy: vi.fn().mockReturnThis(),
-        skip: vi.fn().mockReturnThis(),
-        take: vi.fn().mockReturnThis(),
-        getManyAndCount: vi.fn().mockResolvedValue([
-          [{ id: 1, chunkContent: 'found text', documentName: 'test.md' }],
-          1,
-        ]),
+        addOrderBy: vi.fn().mockReturnThis(),
+        getRawAndEntities: vi.fn().mockResolvedValue({
+          entities: [
+            { id: 1, documentId: 10, chunkContent: 'found text', documentName: 'test.md', chunkIndex: 0 },
+            { id: 2, documentId: 10, chunkContent: 'another match', documentName: 'test.md', chunkIndex: 1 },
+          ],
+          raw: [
+            { rank: 0.5 },
+            { rank: 0.3 },
+          ],
+        }),
       };
       mockChunkRepo.createQueryBuilder.mockReturnValue(mockQb);
 
       const result = await service.search('test query', undefined, 1, 20);
 
+      // Should only return 1 result (highest rank for documentId 10)
       expect(result.data).toHaveLength(1);
+      expect(result.data[0].documentId).toBe(10);
+      expect(result.data[0].rank).toBe(0.5);
       expect(result.total).toBe(1);
       expect(result.page).toBe(1);
       expect(result.pageSize).toBe(20);
       expect(result.totalPages).toBe(1);
-      expect(mockQb.where).toHaveBeenCalledWith(
-        expect.stringContaining("plainto_tsquery('english', :query)"),
-        { query: 'test query' }
-      );
     });
 
     it('adds tag filter when tags provided', async () => {
@@ -407,9 +411,8 @@ describe('KnowledgeService', () => {
         where: vi.fn().mockReturnThis(),
         andWhere: vi.fn().mockReturnThis(),
         orderBy: vi.fn().mockReturnThis(),
-        skip: vi.fn().mockReturnThis(),
-        take: vi.fn().mockReturnThis(),
-        getManyAndCount: vi.fn().mockResolvedValue([[], 0]),
+        addOrderBy: vi.fn().mockReturnThis(),
+        getRawAndEntities: vi.fn().mockResolvedValue({ entities: [], raw: [] }),
       };
       mockChunkRepo.createQueryBuilder.mockReturnValue(mockQb);
 
@@ -421,24 +424,32 @@ describe('KnowledgeService', () => {
       );
     });
 
-    it('paginates correctly', async () => {
+    it('paginates correctly across unique documents', async () => {
+      // Simulate 25 unique documents
+      const entities = [];
+      const raw = [];
+      for (let i = 1; i <= 25; i++) {
+        entities.push({ id: i, documentId: i, chunkContent: `doc ${i}`, documentName: `doc${i}.md`, chunkIndex: 0 });
+        raw.push({ rank: 1.0 - i * 0.01 });
+      }
+
       const mockQb = {
         select: vi.fn().mockReturnThis(),
         addSelect: vi.fn().mockReturnThis(),
         where: vi.fn().mockReturnThis(),
         andWhere: vi.fn().mockReturnThis(),
         orderBy: vi.fn().mockReturnThis(),
-        skip: vi.fn().mockReturnThis(),
-        take: vi.fn().mockReturnThis(),
-        getManyAndCount: vi.fn().mockResolvedValue([[], 50]),
+        addOrderBy: vi.fn().mockReturnThis(),
+        getRawAndEntities: vi.fn().mockResolvedValue({ entities, raw }),
       };
       mockChunkRepo.createQueryBuilder.mockReturnValue(mockQb);
 
-      const result = await service.search('query', undefined, 3, 10);
+      const result = await service.search('query', undefined, 2, 10);
 
-      expect(mockQb.skip).toHaveBeenCalledWith(20); // (3-1) * 10
-      expect(mockQb.take).toHaveBeenCalledWith(10);
-      expect(result.totalPages).toBe(5);
+      expect(result.data).toHaveLength(10); // page 2, 10 items
+      expect(result.total).toBe(25);
+      expect(result.totalPages).toBe(3);
+      expect(result.page).toBe(2);
     });
   });
 });

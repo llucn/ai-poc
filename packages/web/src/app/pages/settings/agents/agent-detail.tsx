@@ -143,8 +143,9 @@ export function AgentDetailPage() {
   // Test each associated Tool's reachability for the Status column.
   const checkServerStatus = useCallback(
     async (toolList: AgentTool[]) => {
-      // Client tools run in the browser; only probe MCP tools' servers.
-      const mcpTools = toolList.filter((t) => t.kind !== 'client');
+      // Client tools run in the browser and server tools are built-in
+      // registry tools with no server URL; only probe remote MCP servers.
+      const mcpTools = toolList.filter((t) => t.kind === 'mcp');
       const entries = await Promise.all(
         mcpTools.map(async (t) => {
           try {
@@ -309,10 +310,16 @@ export function AgentDetailPage() {
                         className={`ic-badge ${
                           tool.kind === 'client'
                             ? 'ic-badge-green'
-                            : 'ic-badge-blue'
+                            : tool.kind === 'server'
+                              ? 'ic-badge-gray'
+                              : 'ic-badge-blue'
                         }`}
                       >
-                        {tool.kind === 'client' ? 'Client' : 'MCP'}
+                        {tool.kind === 'client'
+                          ? 'Client'
+                          : tool.kind === 'server'
+                            ? 'Server'
+                            : 'MCP'}
                       </span>
                     </td>
                     <td className="ic-col-url">{tool.serverUrl || '—'}</td>
@@ -330,10 +337,14 @@ export function AgentDetailPage() {
                       </div>
                     </td>
                     <td className="ic-col-icon">
-                      {tool.kind === 'client' ? (
+                      {tool.kind === 'client' || tool.kind === 'server' ? (
                         <span
                           className="ic-field-hint"
-                          title="Browser tool — no server check"
+                          title={
+                            tool.kind === 'server'
+                              ? 'Built-in server tool — no server check'
+                              : 'Browser tool — no server check'
+                          }
                         >
                           N/A
                         </span>

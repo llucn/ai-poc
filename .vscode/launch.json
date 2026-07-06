@@ -4,12 +4,12 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug @wo-poc/api with Nx",
+      "name": "Debug @ai-poc/api with Nx",
       "runtimeExecutable": "npx",
       "runtimeArgs": [
         "nx",
         "serve",
-        "@wo-poc/api"
+        "@ai-poc/api"
       ],
       "env": {
         "NODE_OPTIONS": "--inspect=9229"

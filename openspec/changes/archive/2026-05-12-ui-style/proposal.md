@@ -16,7 +16,7 @@ The `web` package currently renders the Nx welcome scaffold with no project-spec
 
 ### New Capabilities
 
-- `web-shell`: The top-level web application shell — topbar, sidebar menu, and theme switching for the `@wo-poc/web` package, including the seeded demo navigation items.
+- `web-shell`: The top-level web application shell — topbar, sidebar menu, and theme switching for the `@ai-poc/web` package, including the seeded demo navigation items.
 
 ### Modified Capabilities
 

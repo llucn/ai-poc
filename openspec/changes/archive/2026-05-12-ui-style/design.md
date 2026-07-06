@@ -1,6 +1,6 @@
 ## Context
 
-The `@wo-poc/web` package is a Vite + React 19 + `react-router-dom` 6.29 app currently rendering the default Nx welcome scaffold (`packages/web/src/app/app.tsx` → `<NxWelcome/>` plus two demo `<Link>` placeholders). `packages/web/src/styles.css` is empty.
+The `@ai-poc/web` package is a Vite + React 19 + `react-router-dom` 6.29 app currently rendering the default Nx welcome scaffold (`packages/web/src/app/app.tsx` → `<NxWelcome/>` plus two demo `<Link>` placeholders). `packages/web/src/styles.css` is empty.
 
 `docs/style.md` is the design source of truth. The relevant requirements are:
 

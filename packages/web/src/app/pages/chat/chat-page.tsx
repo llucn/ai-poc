@@ -254,6 +254,13 @@ export function ChatPage() {
             ) {
               try {
                 const msg: Message = JSON.parse(ev.data);
+                console.log('[SSE] Received:', ev.event, {
+                  id: msg.id,
+                  content: msg.content,
+                  isThought: msg.isThought,
+                  hasNativeContent: !!msg.nativeContent,
+                  nativeContentLength: Array.isArray(msg.nativeContent) ? msg.nativeContent.length : 'N/A'
+                });
                 setMessages((prev) => {
                   const filtered = prev.filter((m) => m.id !== THINKING_ID).concat(msg);
                   // Keep the spinner after intermediate thoughts; only remove

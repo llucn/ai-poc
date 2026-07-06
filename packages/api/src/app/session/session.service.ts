@@ -592,6 +592,12 @@ export class SessionService {
         createdOn: new Date(now.getTime() + timestampOffset++),
       });
       const savedToolUseMsg = await this.messageRepository.save(assistantToolUseMsg);
+      this.logger.debug(
+        `Tool use message saved: id=${savedToolUseMsg.id}, ` +
+        `hasNativeContent=${!!savedToolUseMsg.nativeContent}, ` +
+        `nativeContentLength=${Array.isArray(savedToolUseMsg.nativeContent) ? savedToolUseMsg.nativeContent.length : 'N/A'}, ` +
+        `nativeContentSample=${savedToolUseMsg.nativeContent ? JSON.stringify(savedToolUseMsg.nativeContent).substring(0, 200) : 'null'}`
+      );
       res.write(`event: thought_created\n`);
       res.write(`data: ${JSON.stringify(savedToolUseMsg)}\n\n`);
 
@@ -757,6 +763,11 @@ export class SessionService {
       createdOn: new Date(now.getTime() + timestampOffset),
     });
     const savedToolResultsMsg = await this.messageRepository.save(toolResultsMsg);
+    this.logger.debug(
+      `Tool results message saved: id=${savedToolResultsMsg.id}, ` +
+      `hasNativeContent=${!!savedToolResultsMsg.nativeContent}, ` +
+      `nativeContentLength=${Array.isArray(savedToolResultsMsg.nativeContent) ? savedToolResultsMsg.nativeContent.length : 'N/A'}`
+    );
     res.write(`event: thought_created\n`);
     res.write(`data: ${JSON.stringify(savedToolResultsMsg)}\n\n`);
 

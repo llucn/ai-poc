@@ -53,5 +53,5 @@
 
 ## 8. Cleanup
 
-- [x] 8.1 Run the workspace's lint/typecheck (`npx nx lint web`, `npx nx typecheck web` or equivalent) and resolve any new findings. — No `lint` target is configured for `@wo-poc/web`; ran `tsc --noEmit -p packages/web/tsconfig.app.json` (clean) and `npx nx build web` (clean) as the equivalents.
+- [x] 8.1 Run the workspace's lint/typecheck (`npx nx lint web`, `npx nx typecheck web` or equivalent) and resolve any new findings. — No `lint` target is configured for `@ai-poc/web`; ran `tsc --noEmit -p packages/web/tsconfig.app.json` (clean) and `npx nx build web` (clean) as the equivalents.
 - [x] 8.2 Run `openspec validate ui-style` and resolve any reported issues.

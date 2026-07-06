@@ -15,7 +15,7 @@ type Block = {
 };
 
 function stripClientPrefix(name: string): string {
-  const m = /^(?:client|mcp)__\d+__(.+)$/.exec(name);
+  const m = /^(?:client|mcp|server)__\d+__(.+)$/.exec(name);
   return m ? m[1] : name;
 }
 

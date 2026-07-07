@@ -12,6 +12,8 @@ import { ToolEntity } from '../tool/tool.entity';
 import { SkillEntity } from '../skill/skill.entity';
 import { LlmModule } from '../llm/llm.module';
 import { McpModule } from '../mcp/mcp.module';
+import { ToolRegistryModule } from '../tool-registry/tool-registry.module';
+import { ToolsModule } from '../tools/tools.module';
 
 @Module({
   imports: [
@@ -27,6 +29,8 @@ import { McpModule } from '../mcp/mcp.module';
     ]),
     LlmModule,
     McpModule,
+    ToolRegistryModule,
+    ToolsModule,
   ],
   providers: [SessionService],
   controllers: [SessionController],

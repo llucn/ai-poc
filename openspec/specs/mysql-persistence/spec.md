@@ -1,7 +1,7 @@
 # mysql-persistence Specification
 
 ## Purpose
-The shared MySQL connection layer used by @wo-poc/api — env-driven config (no hardcoded credentials), TypeORM DataSource initialization, and the docs/database.sql bootstrap script that every developer runs once. Future persistence features plug into this same connection.
+The shared MySQL connection layer used by @ai-poc/api — env-driven config (no hardcoded credentials), TypeORM DataSource initialization, and the docs/database.sql bootstrap script that every developer runs once. Future persistence features plug into this same connection.
 
 ## Requirements
 
@@ -36,7 +36,7 @@ The repository SHALL contain `packages/api/.env.example` listing every environme
 #### Scenario: New developer copies the example to start the API
 
 - **WHEN** a developer runs `cp packages/api/.env.example packages/api/.env` and starts MySQL locally with the matching defaults
-- **THEN** `npx nx serve @wo-poc/api` boots successfully and connects to the database
+- **THEN** `npx nx serve @ai-poc/api` boots successfully and connects to the database
 
 #### Scenario: Example file lists every key
 

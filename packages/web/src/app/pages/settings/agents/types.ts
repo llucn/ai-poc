@@ -11,8 +11,9 @@ export interface McpToolSchema {
   parameters?: unknown | null;
 }
 
-// Tool execution location: 'mcp' (server-side) or 'client' (browser).
-export type ToolKind = 'mcp' | 'client';
+// Tool execution location: 'mcp' (remote MCP server), 'client' (browser), or
+// 'server' (built-in server-side registry tool).
+export type ToolKind = 'mcp' | 'client' | 'server';
 
 // A Tool is a top-level resource (t_tool) associated with the agent through
 // t_agent_tool. The agent detail endpoint returns the resolved Tool rows.

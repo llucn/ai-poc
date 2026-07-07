@@ -1,5 +1,5 @@
 {
-  "name": "@wo-poc/api",
+  "name": "@ai-poc/api",
   "version": "0.0.1",
   "private": true,
   "nx": {
@@ -63,15 +63,15 @@
           "build"
         ],
         "options": {
-          "buildTarget": "@wo-poc/api:build",
+          "buildTarget": "@ai-poc/api:build",
           "runBuildTargetDependencies": false
         },
         "configurations": {
           "development": {
-            "buildTarget": "@wo-poc/api:build:development"
+            "buildTarget": "@ai-poc/api:build:development"
           },
           "production": {
-            "buildTarget": "@wo-poc/api:build:production"
+            "buildTarget": "@ai-poc/api:build:production"
           }
         }
       }

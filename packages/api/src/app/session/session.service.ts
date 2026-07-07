@@ -23,6 +23,8 @@ import {
   type LlmTurn,
 } from '../llm/llm.service';
 import { McpClientService } from '../mcp/mcp-client.service';
+import { ServerToolExecutorService } from '../tool-registry/server-tool-executor.service';
+import { KnowledgeSimilarityToolService } from '../tools/knowledge-similarity-tool.service';
 import { SYSTEM_PROMPT } from '../agent/system-prompt';
 import type {
   CreateSessionDto,
@@ -42,22 +44,23 @@ const MAX_TOOL_CALLS = 20;
 
 /**
  * Parse a tool name in the format `<prefix>__<toolId>__<toolName>` where prefix
- * is `mcp` (server-side) or `client` (browser). `toolId` is the t_tool.id, so
- * the same tool has a stable name across every agent that references it. The
- * tool name itself may contain underscores, so we split on the first two `__`
- * delimiters only. Returns null if the format doesn't match.
+ * is `mcp` (server-side MCP), `client` (browser), or `server` (backend tool).
+ * `toolId` is the t_tool.id, so the same tool has a stable name across every
+ * agent that references it. The tool name itself may contain underscores, so we
+ * split on the first two `__` delimiters only. Returns null if the format doesn't match.
  *
  * Examples:
  *   "mcp__5__getWeatherForecastByLocation" → { prefix: "mcp", toolId: 5, toolName: "getWeatherForecastByLocation" }
  *   "client__1__console-log-echo"           → { prefix: "client", toolId: 1, toolName: "console-log-echo" }
+ *   "server__9__knowledge-similarity"       → { prefix: "server", toolId: 9, toolName: "knowledge-similarity" }
  *   "invalid_format"                         → null
  */
 export function parseToolName(
   tool: string
-): { prefix: 'mcp' | 'client'; toolId: number; toolName: string } | null {
-  const match = /^(mcp|client)__(\d+)__(.+)$/.exec(tool);
+): { prefix: 'mcp' | 'client' | 'server'; toolId: number; toolName: string } | null {
+  const match = /^(mcp|client|server)__(\d+)__(.+)$/.exec(tool);
   if (!match) return null;
-  const prefix = match[1] as 'mcp' | 'client';
+  const prefix = match[1] as 'mcp' | 'client' | 'server';
   const toolId = Number(match[2]);
   const toolName = match[3];
   if (!Number.isFinite(toolId) || toolName.length === 0) return null;
@@ -131,7 +134,9 @@ export class SessionService {
     private readonly pendingClientCallRepository: Repository<PendingClientCallEntity>,
     private readonly dataSource: DataSource,
     private readonly llmService: LlmService,
-    private readonly mcpClientService: McpClientService
+    private readonly mcpClientService: McpClientService,
+    private readonly serverToolExecutor: ServerToolExecutorService,
+    private readonly knowledgeSimilarityService: KnowledgeSimilarityToolService
   ) {}
 
   /**
@@ -587,6 +592,12 @@ export class SessionService {
         createdOn: new Date(now.getTime() + timestampOffset++),
       });
       const savedToolUseMsg = await this.messageRepository.save(assistantToolUseMsg);
+      this.logger.debug(
+        `Tool use message saved: id=${savedToolUseMsg.id}, ` +
+        `hasNativeContent=${!!savedToolUseMsg.nativeContent}, ` +
+        `nativeContentLength=${Array.isArray(savedToolUseMsg.nativeContent) ? savedToolUseMsg.nativeContent.length : 'N/A'}, ` +
+        `nativeContentSample=${savedToolUseMsg.nativeContent ? JSON.stringify(savedToolUseMsg.nativeContent).substring(0, 200) : 'null'}`
+      );
       res.write(`event: thought_created\n`);
       res.write(`data: ${JSON.stringify(savedToolUseMsg)}\n\n`);
 
@@ -623,11 +634,11 @@ export class SessionService {
         pendingRecords.push(pending);
       }
 
-      // Execute MCP tools immediately (D6: MCP runs server-side, client
-      // tools are dispatched serially to the browser).
+      // Execute MCP and Server tools immediately (D6: MCP and Server run
+      // server-side, client tools are dispatched serially to the browser).
       for (const pending of pendingRecords) {
         const classified = parseToolName(pending.toolName);
-        if (!classified || classified.prefix !== 'mcp') continue;
+        if (!classified || (classified.prefix !== 'mcp' && classified.prefix !== 'server')) continue;
 
         const { toolResult } = await this.executeTool(
           pending.toolUseId,
@@ -752,6 +763,11 @@ export class SessionService {
       createdOn: new Date(now.getTime() + timestampOffset),
     });
     const savedToolResultsMsg = await this.messageRepository.save(toolResultsMsg);
+    this.logger.debug(
+      `Tool results message saved: id=${savedToolResultsMsg.id}, ` +
+      `hasNativeContent=${!!savedToolResultsMsg.nativeContent}, ` +
+      `nativeContentLength=${Array.isArray(savedToolResultsMsg.nativeContent) ? savedToolResultsMsg.nativeContent.length : 'N/A'}`
+    );
     res.write(`event: thought_created\n`);
     res.write(`data: ${JSON.stringify(savedToolResultsMsg)}\n\n`);
 
@@ -819,7 +835,7 @@ export class SessionService {
     for (const link of links) {
       const tool = byId.get(link.toolId);
       if (!tool || !tool.mcpSchema) continue;
-      const prefix = tool.kind === 'client' ? 'client' : 'mcp';
+      const prefix = tool.kind === 'client' ? 'client' : tool.kind === 'server' ? 'server' : 'mcp';
       for (const schema of tool.mcpSchema) {
         result.push({
           name: `${prefix}__${tool.id}__${schema.name}`,
@@ -875,7 +891,7 @@ export class SessionService {
   }> {
     const parsed = parseToolName(toolName);
     if (!parsed) {
-      const message = `Invalid tool name format: "${toolName}". Expected mcp__<id>__<name>.`;
+      const message = `Invalid tool name format: "${toolName}". Expected <prefix>__<id>__<name>.`;
       this.logger.warn(message);
       return {
         toolResult: buildErrorToolResultBlock(toolUseId, message),
@@ -896,11 +912,42 @@ export class SessionService {
     }
 
     try {
-      const result = await this.mcpClientService.callTool(
-        tool.serverUrl,
-        parsed.toolName,
-        input
-      );
+      let result: any;
+
+      if (parsed.prefix === 'server') {
+        // Execute server tool
+        const context = {
+          userId: 'system', // TODO: Get from session/user context
+          userRole: 'user',
+          sessionId: undefined,
+          requestId: toolUseId,
+        };
+
+        // Special handling for knowledge-similarity tool
+        if (parsed.toolName === 'knowledge-similarity') {
+          result = await this.knowledgeSimilarityService.search(
+            (input as any).query,
+            (input as any).tags,
+            (input as any).topN
+          );
+        } else {
+          // Generic server tool execution
+          const executionResult = await this.serverToolExecutor.execute(
+            parsed.toolName,
+            input,
+            context
+          );
+          result = executionResult.success ? executionResult.data : executionResult;
+        }
+      } else {
+        // Execute MCP tool
+        result = await this.mcpClientService.callTool(
+          tool.serverUrl,
+          parsed.toolName,
+          input
+        );
+      }
+
       return {
         toolResult: buildToolResultBlock(toolUseId, result),
         isError: false,
@@ -908,7 +955,7 @@ export class SessionService {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(
-        `MCP tool execution failed: tool=${parsed.toolName} url=${tool.serverUrl}: ${message}`
+        `Tool execution failed: tool=${parsed.toolName} prefix=${parsed.prefix}: ${message}`
       );
       return {
         toolResult: buildErrorToolResultBlock(toolUseId, message),

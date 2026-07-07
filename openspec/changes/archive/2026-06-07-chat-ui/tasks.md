@@ -53,6 +53,6 @@
 
 ## 9. 验证
 
-- [x] 9.1 后端编译通过（`npx nx build @wo-poc/api`）
-- [x] 9.2 前端编译通过（`npx nx build @wo-poc/web`）
+- [x] 9.1 后端编译通过（`npx nx build @ai-poc/api`）
+- [x] 9.2 前端编译通过（`npx nx build @ai-poc/web`）
 - [x] 9.3 手动测试：创建会话 → 发送消息 → 验证 echo 回复 → 删除会话

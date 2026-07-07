@@ -46,8 +46,8 @@
 
 ## 8. 验证
 
-- [x] 8.1 后端编译通过（`npx nx build @wo-poc/api`）
-- [x] 8.2 前端编译通过（`npx nx build @wo-poc/web`）
+- [x] 8.1 后端编译通过（`npx nx build @ai-poc/api`）
+- [x] 8.2 前端编译通过（`npx nx build @ai-poc/web`）
 - [ ] 8.3 手动测试：
   - 在数据库中创建一个默认 Agent（`is_default=1`，配置 `system_prompt` 和 `model_config`，格式：`{"baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1", "authToken": "sk-...", "modelName": "qwen-turbo"}`）
   - 启动后端和前端

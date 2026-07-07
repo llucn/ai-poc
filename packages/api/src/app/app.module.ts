@@ -19,6 +19,8 @@ import { SessionModule } from './session/session.module';
 import { LlmModule } from './llm/llm.module';
 import { ClientToolsModule } from './client-tools/client-tools.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
+import { ToolRegistryModule } from './tool-registry/tool-registry.module';
+import { ToolsModule } from './tools/tools.module';
 
 @Module({
   imports: [
@@ -39,6 +41,8 @@ import { KnowledgeModule } from './knowledge/knowledge.module';
     LlmModule,
     ClientToolsModule,
     KnowledgeModule,
+    ToolRegistryModule,
+    ToolsModule,
   ],
   controllers: [AppController],
   providers: [

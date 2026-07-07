@@ -38,6 +38,6 @@
 
 ## 8. 验证
 
-- [x] 8.1 后端编译通过（`npx nx build @wo-poc/api`）
-- [x] 8.2 前端编译通过（`npx nx build @wo-poc/web`）
+- [x] 8.1 后端编译通过（`npx nx build @ai-poc/api`）
+- [x] 8.2 前端编译通过（`npx nx build @ai-poc/web`）
 - [ ] 8.3 手动测试：发送消息 → 看到 Thought（折叠状态，灯泡图标 + "Thought"）→ 点击展开看到内容 → 再次点击折叠 → 多条 Thought 独立控制 → 刷新页面后历史消息依然有 Thought 标识

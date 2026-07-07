@@ -91,9 +91,11 @@ export class ClientToolsService {
         }
       }
 
-      // 2. Delete registry rows no longer in the reported list.
-      // Find all current source='registry' rows.
-      const currentRegistry = await toolRepo.find({ where: { source: 'registry' } });
+      // 2. Delete client registry rows no longer in the reported list.
+      // Find all current source='registry' AND kind='client' rows.
+      const currentRegistry = await toolRepo.find({
+        where: { source: 'registry', kind: 'client' },
+      });
       const toDelete = currentRegistry.filter(
         (row) => !reportedNames.has(row.serverName)
       );

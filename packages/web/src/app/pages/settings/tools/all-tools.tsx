@@ -53,7 +53,7 @@ export function AllToolsPage() {
   // tools run in the browser and have no server to probe (shown as N/A).
   const checkOnlineStatus = useCallback(
     async (toolList: Tool[]) => {
-      const mcpTools = toolList.filter((t) => t.kind !== 'client');
+      const mcpTools = toolList.filter((t) => t.kind === 'mcp');
       const entries = await Promise.all(
         mcpTools.map(async (t) => {
           try {
@@ -177,10 +177,14 @@ export function AllToolsPage() {
           <td>
             <span
               className={`ic-badge ${
-                tool.kind === 'client' ? 'ic-badge-green' : 'ic-badge-blue'
+                tool.kind === 'client'
+                  ? 'ic-badge-green'
+                  : tool.kind === 'server'
+                  ? 'ic-badge-orange'
+                  : 'ic-badge-blue'
               }`}
             >
-              {tool.kind === 'client' ? 'Client' : 'MCP'}
+              {tool.kind === 'client' ? 'Client' : tool.kind === 'server' ? 'Server' : 'MCP'}
             </span>
           </td>
           <td>
@@ -195,8 +199,8 @@ export function AllToolsPage() {
         <td className="ic-col-url">{tool.serverUrl || '—'}</td>
         <td>{tool.mcpSchema?.length ?? 0}</td>
         <td className="ic-col-icon">
-          {tool.kind === 'client' ? (
-            <span className="ic-field-hint" title="Browser tool — no server check">
+          {tool.kind === 'client' || tool.kind === 'server' ? (
+            <span className="ic-field-hint" title={tool.kind === 'client' ? 'Browser tool — no server check' : 'Server tool — no server check'}>
               N/A
             </span>
           ) : onlineStatus[tool.id] === undefined ? (

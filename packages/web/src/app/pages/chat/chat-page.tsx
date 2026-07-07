@@ -60,7 +60,7 @@ function MessageItem({
     : [];
   const hasNative = blocks.length > 0;
 
-  if (msg.isThought === 1) {
+  if (msg.isThought) {
     // Thought bubble: content + bottom-left fold/expand icon (same layout as
     // regular messages).
     return (

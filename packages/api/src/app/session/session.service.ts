@@ -19,6 +19,9 @@ import { SkillEntity } from '../skill/skill.entity';
 import {
   LlmService,
   buildAnthropicTool,
+  buildCacheableSystem,
+  markStableHistoryBoundary,
+  STABLE_HISTORY_THRESHOLD,
   type AnthropicToolSpec,
   type LlmTurn,
 } from '../llm/llm.service';
@@ -508,7 +511,8 @@ export class SessionService {
     let timestampOffset = 1;
     let toolCallCount = 0;
 
-    const system = await this.buildSystemContent(agent);
+    const { systemText, toolContext } = await this.buildSystemContent(agent);
+    const cacheableSystem = buildCacheableSystem(systemText, toolContext);
     const availableTools = await this.getAvailableTools(agent.id);
     const tools: AnthropicToolSpec[] = availableTools.map((t) =>
       buildAnthropicTool(t.name, t.description, t.parameters)
@@ -527,14 +531,19 @@ export class SessionService {
       // Keep-alive comment before each LLM call to prevent connection timeout.
       res.write(': processing\n\n');
 
-      // Step 1: call LLM
+      // Step 1: call LLM with cache boundaries (design D1, D5)
+      // Mark stable history boundary if conversation exceeds threshold
+      const cachedMessages = messages.length > STABLE_HISTORY_THRESHOLD
+        ? markStableHistoryBoundary(messages, messages.length - STABLE_HISTORY_THRESHOLD)
+        : messages;
+
       this.logger.log(
         `Calling LLM for session ${sessionId} with ${messages.length} messages (toolCallCount=${toolCallCount})`
       );
       const turn: LlmTurn = await this.llmService.callLlm(
         agent,
-        system,
-        messages,
+        cacheableSystem,
+        cachedMessages,
         tools
       );
       this.logger.log(
@@ -787,23 +796,30 @@ export class SessionService {
   }
 
   /**
-   * Build the system-role content for the LLM from three segments, joined by
-   * blank lines (empty segments skipped). Tools are no longer in the system
-   * string — they are passed via the Anthropic `tools` request param.
+   * Build the system-role content for the LLM from three segments, separated
+   * for cache boundary optimization. Returns system text and tool context as
+   * separate strings so they can be marked with cache_control independently.
    *   1. SYSTEM_PROMPT          — the base contract (role / skill rule / ask-user rule)
    *   2. agent.systemPrompt     — agent-specific instructions
    *   3. {"available_skills":[...]}  — skills the agent may read via read_skill
    */
-  private async buildSystemContent(agent: AgentEntity): Promise<string> {
+  private async buildSystemContent(agent: AgentEntity): Promise<{
+    systemText: string;
+    toolContext: string;
+  }> {
     const availableSkills = await this.getAvailableSkills(agent.id);
 
-    const segments = [
+    const systemSegments = [
       SYSTEM_PROMPT,
       agent.systemPrompt ?? '',
-      JSON.stringify({ available_skills: availableSkills }),
     ].filter((s) => s && s.trim().length > 0);
 
-    return segments.join('\n\n');
+    const toolContext = JSON.stringify({ available_skills: availableSkills });
+
+    return {
+      systemText: systemSegments.join('\n\n'),
+      toolContext,
+    };
   }
 
   /**

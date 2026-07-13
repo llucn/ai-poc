@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type {
   ContentBlockParam,
   MessageParam,
+  TextBlockParam,
   ToolUnion,
 } from '@anthropic-ai/sdk/resources/messages';
 import type { AgentEntity } from '../agent/agent.entity';
@@ -15,6 +16,23 @@ import type { AgentEntity } from '../agent/agent.entity';
  * a truncated response as a final answer (design risk note).
  */
 export const DEFAULT_MAX_TOKENS = 4096;
+
+/**
+ * Number of recent messages to leave uncached for prompt caching optimization.
+ * The last 2 turns (4 messages: user → assistant → user → assistant) are most
+ * likely to be edited or retried, so we don't cache them. Messages before this
+ * threshold are considered stable and marked as cacheable. This balances cache
+ * hit rates with flexibility for recent message edits.
+ */
+export const STABLE_HISTORY_THRESHOLD = 4;
+
+/**
+ * Cache control metadata for Anthropic prompt caching. Marks content blocks
+ * as cacheable with a 5-minute TTL (ephemeral cache).
+ */
+export interface CacheControl {
+  type: 'ephemeral';
+}
 
 /**
  * Minimal spec of an Anthropic tool declaration that the agent loop
@@ -95,6 +113,101 @@ function isObjectSchema(value: unknown): boolean {
   );
 }
 
+/**
+ * Build a cacheable system prompt with 3-tier cache boundaries for Anthropic
+ * prompt caching. This implements the cache boundary strategy from design D1:
+ *
+ * Tier 1: System prompt + tools (cached) - these change infrequently (only
+ * when agent config updates), so we mark the last block with cache_control
+ * to maximize cache hits across turns.
+ *
+ * @param systemText - The base system prompt text
+ * @param toolsText - Optional tool context (e.g., JSON of available tools)
+ * @returns Array of text blocks with cache_control on the last block
+ */
+export function buildCacheableSystem(
+  systemText: string,
+  toolsText?: string
+): TextBlockParam[] {
+  const blocks: TextBlockParam[] = [{ type: 'text', text: systemText }];
+
+  if (toolsText && toolsText.trim().length > 0) {
+    // Add tools as separate block with cache breakpoint
+    blocks.push({
+      type: 'text',
+      text: toolsText,
+      cache_control: { type: 'ephemeral' },
+    });
+  } else {
+    // No tools - mark system prompt itself as cacheable
+    blocks[0] = {
+      ...blocks[0],
+      cache_control: { type: 'ephemeral' },
+    };
+  }
+
+  return blocks;
+}
+
+/**
+ * Mark the stable history boundary for prompt caching (Tier 2 of the 3-tier
+ * cache strategy). Adds cache_control to the last content block of the message
+ * at stableCount-1, making all messages before that boundary cacheable.
+ *
+ * The last STABLE_HISTORY_THRESHOLD messages remain uncached because they're
+ * most likely to be edited/retried. Messages before this threshold are stable
+ * and benefit from caching.
+ *
+ * @param messages - The message history array
+ * @param stableCount - Number of stable messages (all but last N)
+ * @returns Modified messages array with cache_control on stable boundary
+ */
+export function markStableHistoryBoundary(
+  messages: MessageParam[],
+  stableCount: number
+): MessageParam[] {
+  // Edge cases: no messages, or stableCount out of bounds
+  if (messages.length === 0 || stableCount <= 0 || stableCount > messages.length) {
+    return messages;
+  }
+
+  const boundaryIndex = stableCount - 1;
+  const boundaryMessage = messages[boundaryIndex];
+
+  // Messages must have content as an array to add cache_control
+  if (!boundaryMessage.content || !Array.isArray(boundaryMessage.content)) {
+    return messages;
+  }
+
+  const content = boundaryMessage.content;
+  if (content.length === 0) {
+    return messages;
+  }
+
+  // Clone the messages array and the boundary message to avoid mutation
+  const updatedMessages = [...messages];
+  const lastBlockIndex = content.length - 1;
+  const lastBlock = content[lastBlockIndex];
+
+  // Only text blocks support cache_control
+  if (lastBlock.type !== 'text') {
+    return messages;
+  }
+
+  updatedMessages[boundaryIndex] = {
+    ...boundaryMessage,
+    content: [
+      ...content.slice(0, lastBlockIndex),
+      {
+        ...lastBlock,
+        cache_control: { type: 'ephemeral' },
+      },
+    ],
+  };
+
+  return updatedMessages;
+}
+
 interface ModelConfig {
   baseUrl?: string | null;
   authToken: string;
@@ -110,13 +223,17 @@ export class LlmService {
    * native message context. Returns a structured `LlmTurn` mapping the
    * response's content blocks + `stop_reason`. Non-streaming.
    *
+   * Supports prompt caching via cache_control headers on system and message
+   * content blocks. System parameter accepts either a string (legacy) or an
+   * array of TextBlockParam (for cache control).
+   *
    * Design refs: D2 (structured turn result), D3 (native message context),
    * D5 (tools array shape), D7 (config mapping), 2.4 (max_tokens handling),
    * 2.5 (config validation).
    */
   async callLlm(
     agent: AgentEntity,
-    system: string,
+    system: string | TextBlockParam[],
     messages: AnthropicMessages,
     tools: AnthropicToolSpec[]
   ): Promise<LlmTurn> {
@@ -135,6 +252,22 @@ export class LlmService {
         messages,
         ...(tools.length > 0 ? { tools: tools as ToolUnion[] } : {}),
       });
+
+      // Log cache usage metrics for prompt caching monitoring (design D4)
+      // Format: "LLM call agent=<id>: cached=<N> created=<N> uncached=<N> output=<N>"
+      // - cached: tokens read from cache (cache hit)
+      // - created: tokens written to cache (cache miss, first occurrence)
+      // - uncached: tokens not eligible for caching
+      // - output: response tokens generated
+      // Use these metrics to calculate cache hit rate: cached / (cached + created + uncached)
+      const usage = response.usage;
+      this.logger.log(
+        `LLM call agent=${agent.id}: ` +
+        `cached=${usage.cache_read_input_tokens ?? 0} ` +
+        `created=${usage.cache_creation_input_tokens ?? 0} ` +
+        `uncached=${usage.input_tokens ?? 0} ` +
+        `output=${usage.output_tokens ?? 0}`
+      );
 
       // The API hard-fails on a truncated reply: never present partial text
       // as a final answer, since the model may have been mid-tool-call.

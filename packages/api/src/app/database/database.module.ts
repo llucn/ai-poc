@@ -11,6 +11,7 @@ import { SkillEntity } from '../skill/skill.entity';
 import { SessionEntity } from '../session/session.entity';
 import { MessageEntity } from '../session/message.entity';
 import { PendingClientCallEntity } from '../session/pending-client-call.entity';
+import { AgentSwitchLogEntity } from '../session/agent-switch-log.entity';
 import { DocumentEntity } from '../knowledge/document.entity';
 import { DocumentChunkEntity } from '../knowledge/document-chunk.entity';
 
@@ -35,6 +36,7 @@ import { DocumentChunkEntity } from '../knowledge/document-chunk.entity';
           SessionEntity,
           MessageEntity,
           PendingClientCallEntity,
+          AgentSwitchLogEntity,
           DocumentEntity,
           DocumentChunkEntity,
         ],

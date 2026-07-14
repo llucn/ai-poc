@@ -82,7 +82,7 @@ export class KnowledgeSimilarityToolService {
         documentPath: chunk.documentPath,
         documentType: chunk.documentType,
         chunkIndex: chunk.chunkIndex,
-        chunkContent: chunk.chunkContent,
+        chunkContent: chunk.chunkContent || '',
         score: parseFloat(results.raw[i].score),
       })),
       total: results.entities.length,

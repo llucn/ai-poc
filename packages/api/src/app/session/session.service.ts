@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import type {
   ContentBlockParam,
   MessageParam,
+  TextBlockParam,
   ToolResultBlockParam,
   ToolUseBlockParam,
 } from '@anthropic-ai/sdk/resources/messages';
@@ -518,11 +519,11 @@ export class SessionService {
 
     // Build initial agent configuration
     let currentAgent = agent;
-    let systemText: string;
-    let toolContext: string;
-    let cacheableSystem: TextBlockParam[];
-    let availableTools: { name: string; description: string | null; parameters: unknown }[];
-    let tools: AnthropicToolSpec[];
+    let systemText!: string;
+    let toolContext!: string;
+    let cacheableSystem!: TextBlockParam[];
+    let availableTools!: { name: string; description: string | null; parameters: unknown }[];
+    let tools!: AnthropicToolSpec[];
     let forwardingContext: string | null = null;
 
     const rebuildAgentConfig = async () => {

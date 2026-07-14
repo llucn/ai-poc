@@ -92,7 +92,7 @@ export class KnowledgeController {
   @Roles('SYSTEM_ADMIN')
   @UseInterceptors(FileInterceptor('file'))
   async uploadAttachment(
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFile() file: any,
     @Body('parentId') parentId: string,
     @CurrentUser() user: any,
   ) {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faFolder, faFile, faFilePdf } from '@fortawesome/free-solid-svg-icons';
 import MDEditor from '@uiw/react-md-editor';
@@ -13,7 +13,6 @@ type SortField = 'name' | 'createdOn' | 'updatedOn';
 type SortOrder = 'ASC' | 'DESC';
 
 export function DocumentListPage() {
-  const navigate = useNavigate();
   const apiFetch = useApiFetch();
   const user = useUser();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -62,7 +61,6 @@ export function DocumentListPage() {
     try {
       const res = await apiFetch(`/knowledge/documents/${parentId}`);
       const doc = await res.json();
-      const parts = doc.path.split('/').filter(Boolean);
       // Build breadcrumb trail by walking up
       const trail: { id: number; name: string }[] = [];
       let currentId = parentId;

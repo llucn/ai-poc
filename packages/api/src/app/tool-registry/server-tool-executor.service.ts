@@ -60,14 +60,14 @@ export class ServerToolExecutorService {
         message: 'Server tool execution failed',
         toolName,
         userId: context.userId,
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
         duration,
       });
 
       return {
         success: false,
-        error: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+        error: error instanceof Error ? error.message : String(error),
+        stack: process.env.NODE_ENV === 'development' && error instanceof Error ? error.stack : undefined,
       };
     }
   }
@@ -83,8 +83,8 @@ export class ServerToolExecutorService {
       return toolDef.parameters.parse(params);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        const errorMessages = error.errors
-          .map((e) => `${e.path.join('.')}: ${e.message}`)
+        const errorMessages = error.issues
+          .map((e: z.ZodIssue) => `${e.path.join('.')}: ${e.message}`)
           .join(', ');
         throw new Error(`Parameter validation failed: ${errorMessages}`);
       }

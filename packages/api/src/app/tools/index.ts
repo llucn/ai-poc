@@ -1,5 +1,6 @@
 import { ServerToolDefinition } from '../tool-registry/define-server-tool';
 import { knowledgeSimilarityTool } from './knowledge-similarity.tool';
+import { agentSwitchTool } from './agent-switch.tool';
 
 /**
  * Registry of all server tools.
@@ -7,4 +8,5 @@ import { knowledgeSimilarityTool } from './knowledge-similarity.tool';
  */
 export const SERVER_TOOLS: ServerToolDefinition<any>[] = [
   knowledgeSimilarityTool,
+  agentSwitchTool,
 ];

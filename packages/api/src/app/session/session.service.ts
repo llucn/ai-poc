@@ -5,12 +5,14 @@ import { randomUUID } from 'crypto';
 import type {
   ContentBlockParam,
   MessageParam,
+  TextBlockParam,
   ToolResultBlockParam,
   ToolUseBlockParam,
 } from '@anthropic-ai/sdk/resources/messages';
 import { SessionEntity } from './session.entity';
 import { MessageEntity } from './message.entity';
 import { PendingClientCallEntity } from './pending-client-call.entity';
+import { AgentSwitchLogEntity } from './agent-switch-log.entity';
 import { AgentEntity } from '../agent/agent.entity';
 import { AgentToolEntity } from '../agent/agent-tool.entity';
 import { AgentSkillEntity } from '../agent/agent-skill.entity';
@@ -28,6 +30,7 @@ import {
 import { McpClientService } from '../mcp/mcp-client.service';
 import { ServerToolExecutorService } from '../tool-registry/server-tool-executor.service';
 import { KnowledgeSimilarityToolService } from '../tools/knowledge-similarity-tool.service';
+import { AgentSwitchToolService } from '../tools/agent-switch-tool.service';
 import { SYSTEM_PROMPT } from '../agent/system-prompt';
 import type {
   CreateSessionDto,
@@ -135,11 +138,14 @@ export class SessionService {
     private readonly skillRepository: Repository<SkillEntity>,
     @InjectRepository(PendingClientCallEntity)
     private readonly pendingClientCallRepository: Repository<PendingClientCallEntity>,
+    @InjectRepository(AgentSwitchLogEntity)
+    private readonly switchLogRepo: Repository<AgentSwitchLogEntity>,
     private readonly dataSource: DataSource,
     private readonly llmService: LlmService,
     private readonly mcpClientService: McpClientService,
     private readonly serverToolExecutor: ServerToolExecutorService,
-    private readonly knowledgeSimilarityService: KnowledgeSimilarityToolService
+    private readonly knowledgeSimilarityService: KnowledgeSimilarityToolService,
+    private readonly agentSwitchService: AgentSwitchToolService
   ) {}
 
   /**
@@ -511,12 +517,33 @@ export class SessionService {
     let timestampOffset = 1;
     let toolCallCount = 0;
 
-    const { systemText, toolContext } = await this.buildSystemContent(agent);
-    const cacheableSystem = buildCacheableSystem(systemText, toolContext);
-    const availableTools = await this.getAvailableTools(agent.id);
-    const tools: AnthropicToolSpec[] = availableTools.map((t) =>
-      buildAnthropicTool(t.name, t.description, t.parameters)
-    );
+    // Build initial agent configuration
+    let currentAgent = agent;
+    let systemText!: string;
+    let toolContext!: string;
+    let cacheableSystem!: TextBlockParam[];
+    let availableTools!: { name: string; description: string | null; parameters: unknown }[];
+    let tools!: AnthropicToolSpec[];
+    let forwardingContext: string | null = null;
+
+    const rebuildAgentConfig = async () => {
+      const config = await this.buildSystemContent(currentAgent);
+      systemText = config.systemText;
+      toolContext = config.toolContext;
+
+      // Prepend forwarding context if available
+      if (forwardingContext) {
+        systemText = forwardingContext + '\n\n' + systemText;
+      }
+
+      cacheableSystem = buildCacheableSystem(systemText, toolContext);
+      availableTools = await this.getAvailableTools(currentAgent.id);
+      tools = availableTools.map((t) =>
+        buildAnthropicTool(t.name, t.description, t.parameters)
+      );
+    };
+
+    await rebuildAgentConfig();
 
     while (true) {
       // Abort early if the client has disconnected.
@@ -541,7 +568,7 @@ export class SessionService {
         `Calling LLM for session ${sessionId} with ${messages.length} messages (toolCallCount=${toolCallCount})`
       );
       const turn: LlmTurn = await this.llmService.callLlm(
-        agent,
+        currentAgent,
         cacheableSystem,
         cachedMessages,
         tools
@@ -652,7 +679,9 @@ export class SessionService {
         const { toolResult } = await this.executeTool(
           pending.toolUseId,
           pending.toolName,
-          pending.params
+          pending.params,
+          pending.sessionId,
+          createdBy
         );
         pending.messageContext = {
           type: 'tool_result',
@@ -678,6 +707,36 @@ export class SessionService {
       timestampOffset += 1;
       messages.push({ role: 'user', content: toolResults });
       toolCallCount++;
+
+      // Check if any tool result indicates an agent switch
+      const switchResult = await this.checkAndReloadAgent(session, currentAgent, toolResults);
+      if (switchResult.switched) {
+        // Reload agent configuration
+        const reloadedAgent = await this.agentRepository.findOne({
+          where: { id: session.agentId || 0 },
+        });
+        if (reloadedAgent) {
+          currentAgent = reloadedAgent;
+
+          // Build forwarding context if available
+          if (switchResult.forwardContext) {
+            forwardingContext = `## Agent Routing Context
+
+This conversation was routed from the "${switchResult.forwardContext.sourceAgent}" agent.
+
+**Forwarded Request:** ${switchResult.forwardContext.promptForward}
+**Classification Confidence:** ${(switchResult.forwardContext.confidenceScore * 100).toFixed(0)}%
+
+The user's original message has been analyzed and categorized for you. Focus on addressing the forwarded request above.`;
+          }
+
+          await rebuildAgentConfig();
+
+          this.logger.log(
+            `Agent reloaded for session ${sessionId}: ${currentAgent.name} (id=${currentAgent.id})`
+          );
+        }
+      }
     }
   }
 
@@ -781,6 +840,61 @@ export class SessionService {
     res.write(`data: ${JSON.stringify(savedToolResultsMsg)}\n\n`);
 
     return toolResults;
+  }
+
+  /**
+   * Check if any tool result indicates an agent switch (agent-switch tool returned { switched: true }).
+   * If so, reload the session entity to get the updated agentId.
+   * Returns an object with switch status and forwarding metadata.
+   */
+  private async checkAndReloadAgent(
+    session: SessionEntity,
+    currentAgent: AgentEntity,
+    toolResults: ContentBlockParam[]
+  ): Promise<{ switched: boolean; forwardContext?: { promptForward: string; confidenceScore: number; sourceAgent: string } }> {
+    // Check each tool result for agent switch response
+    for (const result of toolResults) {
+      if (result.type === 'tool_result' && !('is_error' in result && result.is_error)) {
+        try {
+          const content = typeof result.content === 'string' ? result.content : JSON.stringify(result.content);
+          const parsed = JSON.parse(content);
+          if (parsed.switched === true) {
+            // Agent switch detected - reload session to get updated agentId
+            const reloadedSession = await this.sessionRepository.findOne({
+              where: { id: session.id },
+            });
+            if (reloadedSession && reloadedSession.agentId !== currentAgent.id) {
+              // Update the session object reference
+              session.agentId = reloadedSession.agentId;
+              session.lastActivityTime = reloadedSession.lastActivityTime;
+              session.updatedOn = reloadedSession.updatedOn;
+              session.updatedBy = reloadedSession.updatedBy;
+
+              // Get forwarding metadata from the most recent switch log
+              const switchLog = await this.switchLogRepo.findOne({
+                where: { sessionId: session.id },
+                order: { switchedAt: 'DESC' },
+              });
+
+              if (switchLog) {
+                return {
+                  switched: true,
+                  forwardContext: {
+                    promptForward: switchLog.promptForward,
+                    confidenceScore: switchLog.confidenceScore,
+                    sourceAgent: currentAgent.name,
+                  },
+                };
+              }
+              return { switched: true };
+            }
+          }
+        } catch (err) {
+          // Not JSON or doesn't have switched field - continue
+        }
+      }
+    }
+    return { switched: false };
   }
 
   /** Update a session's last activity timestamp after a turn or suspension. */
@@ -900,7 +1014,9 @@ export class SessionService {
   private async executeTool(
     toolUseId: string,
     toolName: string,
-    input: unknown
+    input: unknown,
+    sessionId: number,
+    createdBy: string
   ): Promise<{
     toolResult: ToolResultBlockParam;
     isError: boolean;
@@ -945,6 +1061,15 @@ export class SessionService {
             (input as any).query,
             (input as any).tags,
             (input as any).topN
+          );
+        } else if (parsed.toolName === 'agent-switch') {
+          // Special handling for agent-switch tool
+          result = await this.agentSwitchService.switchAgent(
+            sessionId,
+            (input as any).agent,
+            (input as any).confidence_score,
+            (input as any).prompt_forward,
+            createdBy
           );
         } else {
           // Generic server tool execution

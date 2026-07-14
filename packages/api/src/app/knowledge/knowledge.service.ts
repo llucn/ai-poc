@@ -3,7 +3,6 @@ import {
   ConflictException,
   NotFoundException,
   BadRequestException,
-  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -136,13 +135,6 @@ export class KnowledgeService {
   }
 
   async listByParent(parentId: number, sortBy = 'name', sortOrder: 'ASC' | 'DESC' = 'ASC') {
-    const validSorts: Record<string, string> = {
-      name: 'name',
-      createdOn: 'created_on',
-      updatedOn: 'updated_on',
-    };
-    const orderCol = validSorts[sortBy] || 'name';
-
     const docs = await this.documentRepo.find({
       where: { parentId },
       order: { [sortBy === 'name' ? 'name' : sortBy === 'createdOn' ? 'createdOn' : 'updatedOn']: sortOrder },
@@ -176,7 +168,6 @@ export class KnowledgeService {
   async rename(id: number, dto: RenameDocumentDto, updatedBy: string): Promise<DocumentEntity> {
     const doc = await this.findOne(id);
     const oldPath = doc.path;
-    const oldName = doc.name;
 
     await this.checkDuplicate(doc.parentId, dto.name, id);
 

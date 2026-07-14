@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { z } from 'zod';
 import { ToolEntity } from '../tool/tool.entity';
 import { ServerToolDefinition } from './define-server-tool';
 import { SERVER_TOOLS } from '../tools';

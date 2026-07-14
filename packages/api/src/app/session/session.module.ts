@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SessionEntity } from './session.entity';
 import { MessageEntity } from './message.entity';
 import { PendingClientCallEntity } from './pending-client-call.entity';
+import { AgentSwitchLogEntity } from './agent-switch-log.entity';
 import { SessionService } from './session.service';
 import { SessionController } from './session.controller';
 import { AgentEntity } from '../agent/agent.entity';
@@ -26,6 +27,7 @@ import { ToolsModule } from '../tools/tools.module';
       ToolEntity,
       SkillEntity,
       PendingClientCallEntity,
+      AgentSwitchLogEntity,
     ]),
     LlmModule,
     McpModule,

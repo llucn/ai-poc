@@ -43,6 +43,7 @@ export const DEMO_MENU: MenuItem[] = [
       { id: 'settings-agents', label: 'Agents', to: '/settings/agents', roles: ['SYSTEM_ADMIN'] },
       { id: 'settings-tools', label: 'Tools', to: '/settings/tools', roles: ['SYSTEM_ADMIN'] },
       { id: 'settings-skills', label: 'Skills', to: '/settings/skills', roles: ['SYSTEM_ADMIN'] },
+      { id: 'settings-jobs', label: 'Jobs', to: '/settings/jobs', roles: ['SYSTEM_ADMIN'] },
       { id: 'settings-memory', label: 'Memory', to: '/dashboard/overview', roles: ['SYSTEM_ADMIN'] },
     ],
   },

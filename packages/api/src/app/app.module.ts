@@ -21,6 +21,7 @@ import { ClientToolsModule } from './client-tools/client-tools.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { ToolRegistryModule } from './tool-registry/tool-registry.module';
 import { ToolsModule } from './tools/tools.module';
+import { JobModule } from './job/job.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { ToolsModule } from './tools/tools.module';
     KnowledgeModule,
     ToolRegistryModule,
     ToolsModule,
+    JobModule,
   ],
   controllers: [AppController],
   providers: [

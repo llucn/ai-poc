@@ -14,6 +14,8 @@ import { PendingClientCallEntity } from '../session/pending-client-call.entity';
 import { AgentSwitchLogEntity } from '../session/agent-switch-log.entity';
 import { DocumentEntity } from '../knowledge/document.entity';
 import { DocumentChunkEntity } from '../knowledge/document-chunk.entity';
+import { JobEntity } from '../job/job.entity';
+import { JobLogEntity } from '../job/job-log.entity';
 
 @Module({
   imports: [
@@ -39,6 +41,8 @@ import { DocumentChunkEntity } from '../knowledge/document-chunk.entity';
           AgentSwitchLogEntity,
           DocumentEntity,
           DocumentChunkEntity,
+          JobEntity,
+          JobLogEntity,
         ],
         synchronize: false,
         logging: ['error', 'warn'],

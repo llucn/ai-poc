@@ -397,6 +397,71 @@ export class SessionService {
     }
   }
 
+  /**
+   * Create a session programmatically for scheduled job execution.
+   * Uses the specified agent directly (no selector agent routing).
+   */
+  async createSessionForJob(
+    agentId: number,
+    createdBy: string,
+  ): Promise<SessionEntity> {
+    const now = new Date();
+    const session = this.sessionRepository.create({
+      name: `Job execution ${now.toISOString()}`,
+      userName: createdBy,
+      agentId,
+      lastActivityTime: now,
+      createdOn: now,
+      createdBy,
+    });
+    return this.sessionRepository.save(session);
+  }
+
+  /**
+   * Send a message to a session and collect the full response (non-streaming).
+   * Used by the job executor for scheduled execution.
+   */
+  async sendMessageNonStreaming(
+    sessionId: number,
+    content: string,
+    userName: string,
+    createdBy: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const session = await this.sessionRepository.findOne({
+      where: { id: sessionId },
+    });
+    if (!session) {
+      throw new NotFoundException(`Session ${sessionId} not found`);
+    }
+
+    const agent = await this.agentRepository.findOne({
+      where: { id: session.agentId || 0 },
+    });
+    if (!agent) {
+      throw new NotFoundException(`Agent ${session.agentId} not found`);
+    }
+
+    // Save user message
+    const now = new Date();
+    const userMessage = this.messageRepository.create({
+      ...createUserMessage(sessionId, userName, content, createdBy),
+      createdOn: now,
+    });
+    await this.messageRepository.save(userMessage);
+
+    // Build context
+    const history = await this.messageRepository.find({
+      where: { sessionId, messageType: 1 },
+      order: { createdOn: 'ASC', id: 'ASC' },
+      take: 50,
+    });
+    const messages: MessageParam[] = reconstructNativeMessages(history);
+
+    // Run loop non-streaming
+    return this.runLoopNonStreaming(session, agent, messages, createdBy, signal);
+  }
+
 
   /**
    * Run a full multi-turn assistant turn for a session: persist the user
@@ -737,6 +802,79 @@ The user's original message has been analyzed and categorized for you. Focus on 
           );
         }
       }
+    }
+  }
+
+  /**
+   * Non-streaming agent loop for job execution. Runs the LLM loop to completion
+   * and returns the final text response. Only executes server/MCP tools (no
+   * client tool suspension). Used by JobExecutorService.
+   */
+  private async runLoopNonStreaming(
+    session: SessionEntity,
+    agent: AgentEntity,
+    messages: MessageParam[],
+    createdBy: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const sessionId = session.id;
+    let toolCallCount = 0;
+
+    const config = await this.buildSystemContent(agent);
+    const cacheableSystem = buildCacheableSystem(
+      config.systemText, config.toolContext,
+    );
+    const availableTools = await this.getAvailableTools(agent.id);
+    const tools = availableTools.map((t) =>
+      buildAnthropicTool(t.name, t.description, t.parameters)
+    );
+
+    while (true) {
+      if (signal?.aborted) {
+        throw new Error('Job execution aborted (timeout)');
+      }
+
+      const cachedMessages = messages.length > STABLE_HISTORY_THRESHOLD
+        ? markStableHistoryBoundary(
+            messages, messages.length - STABLE_HISTORY_THRESHOLD,
+          )
+        : messages;
+
+      const turn: LlmTurn = await this.llmService.callLlm(
+        agent, cacheableSystem, cachedMessages, tools,
+      );
+
+      if (turn.kind === 'final') {
+        await this.finalizeSession(session, createdBy);
+        return turn.text;
+      }
+
+      if (turn.kind === 'error') {
+        await this.finalizeSession(session, createdBy);
+        throw new Error(turn.message);
+      }
+
+      // tool_use
+      if (toolCallCount >= MAX_TOOL_CALLS) {
+        await this.finalizeSession(session, createdBy);
+        throw new Error(
+          `Tool call limit exceeded (max ${MAX_TOOL_CALLS})`,
+        );
+      }
+
+      messages.push({ role: 'assistant', content: turn.assistantContent });
+
+      // Execute all tools server-side (skip client tools)
+      const resultBlocks: ToolResultBlockParam[] = [];
+      for (const toolUse of turn.toolUses) {
+        const { toolResult } = await this.executeTool(
+          toolUse.id, toolUse.name, toolUse.input, sessionId, createdBy,
+        );
+        resultBlocks.push(toolResult);
+      }
+
+      messages.push({ role: 'user', content: resultBlocks });
+      toolCallCount++;
     }
   }
 

@@ -26,6 +26,12 @@ import { AllSkillsPage } from './pages/settings/skills/all-skills';
 import { SkillDetailPage } from './pages/settings/skills/skill-detail';
 import { AddSkillPage } from './pages/settings/skills/add-skill';
 import { EditSkillPage } from './pages/settings/skills/edit-skill';
+import { AllJobsPage } from './pages/settings/jobs/all-jobs';
+import { JobDetailPage } from './pages/settings/jobs/job-detail';
+import { AddJobPage } from './pages/settings/jobs/add-job';
+import { EditJobPage } from './pages/settings/jobs/edit-job';
+import { JobLogListPage } from './pages/settings/jobs/job-log-list';
+import { JobLogDetailPage } from './pages/settings/jobs/job-log-detail';
 import { SessionListPage } from './pages/chat/session-list';
 import { ChatPage } from './pages/chat/chat-page';
 import { AppShell } from './shell/app-shell';
@@ -207,6 +213,54 @@ export function App() {
                   element={
                     <RequireRole role="SYSTEM_ADMIN">
                       <EditSkillPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/jobs"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <AllJobsPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/jobs/new"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <AddJobPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/jobs/:id"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <JobDetailPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/jobs/:id/edit"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <EditJobPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/jobs/:id/logs"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <JobLogListPage />
+                    </RequireRole>
+                  }
+                />
+                <Route
+                  path="/settings/jobs/:id/logs/:logId"
+                  element={
+                    <RequireRole role="SYSTEM_ADMIN">
+                      <JobLogDetailPage />
                     </RequireRole>
                   }
                 />
